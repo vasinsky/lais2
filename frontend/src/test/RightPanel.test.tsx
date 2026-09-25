@@ -73,7 +73,7 @@ describe('RightPanel Component', () => {
             {
               role: 'assistant',
               content: 'Image generation completed.',
-              generated_image: 'http://localhost:8000/api/chat/image/view?filename=test.png',
+              generated_image: '/api/chat/image/view?filename=test.png',
               image_prompt: 'cyberpunk street in rain',
               image_progress: { step: 20, total: 20, percent: 100, status: 'Completed' },
             },

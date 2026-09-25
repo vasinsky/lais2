@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../../config";
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Sparkles, MessageSquare, Terminal, Trash2, Paperclip,
@@ -79,7 +80,7 @@ export default function RightPanel({
 
   const loadHistory = () => {
     if (mode === 'chat') {
-      fetch('http://localhost:8000/api/chat/history')
+      fetch(`${API_BASE_URL}/chat/history`)
         .then(res => res.json())
         .then(data => setMessages(Array.isArray(data) ? data : []))
         .catch(() => setMessages([]));
@@ -88,7 +89,7 @@ export default function RightPanel({
         setMessages([]);
         return;
       }
-      fetch(`http://localhost:8000/api/agent/${encodeURIComponent(activeProject)}/history`)
+      fetch(`${API_BASE_URL}/agent/${encodeURIComponent(activeProject)}/history`)
         .then(res => res.json())
         .then(data => setMessages(Array.isArray(data) ? data : []))
         .catch(() => setMessages([]));
@@ -101,7 +102,7 @@ export default function RightPanel({
 
   const handleClearHistory = () => {
     if (mode === 'chat') {
-      fetch('http://localhost:8000/api/chat/history', { method: 'DELETE' })
+      fetch(`${API_BASE_URL}/chat/history`, { method: 'DELETE' })
         .then(res => {
           if (res.ok) {
             setMessages([]);
@@ -109,7 +110,7 @@ export default function RightPanel({
           }
         });
     } else if (activeProject) {
-      fetch(`http://localhost:8000/api/agent/${encodeURIComponent(activeProject)}/history`, { method: 'DELETE' })
+      fetch(`${API_BASE_URL}/agent/${encodeURIComponent(activeProject)}/history`, { method: 'DELETE' })
         .then(res => {
           if (res.ok) {
             setMessages([]);
@@ -122,8 +123,8 @@ export default function RightPanel({
   const handleDeleteMessage = async (idx: number) => {
     try {
       const url = mode === 'chat' 
-        ? `http://localhost:8000/api/chat/messages/${idx}`
-        : `http://localhost:8000/api/agent/${encodeURIComponent(activeProject || '')}/messages/${idx}`;
+        ? `/api/chat/messages/${idx}`
+        : `/api/agent/${encodeURIComponent(activeProject || '')}/messages/${idx}`;
       
       const res = await fetch(url, { method: 'DELETE' });
       if (res.ok) {
@@ -169,7 +170,7 @@ export default function RightPanel({
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/api/projects/${encodeURIComponent(activeProject)}/save-image`, {
+      const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(activeProject)}/save-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export default function RightPanel({
       abortControllerRef.current.abort();
     }
     try {
-      await fetch('http://localhost:8000/api/chat/interrupt', { method: 'POST' });
+      await fetch(`${API_BASE_URL}/chat/interrupt`, { method: 'POST' });
     } catch (_) {}
 
     setIsLoading(false);
@@ -349,7 +350,7 @@ export default function RightPanel({
 
     if (mode === 'chat') {
       try {
-        const res = await fetch('http://localhost:8000/api/chat/completions', {
+        const res = await fetch(`${API_BASE_URL}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -491,7 +492,7 @@ export default function RightPanel({
     } else {
       // Режим Project Agent
       try {
-        const res = await fetch('http://localhost:8000/api/agent/execute', {
+        const res = await fetch(`${API_BASE_URL}/agent/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -1012,22 +1013,26 @@ function ImageCardWithHover({
 }) {
   const [isHovered, setIsHovered] = useState(false);
 
+const formattedSrc = (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("data:"))
+    ? imageUrl
+    : `data:image/png;base64,${imageUrl}`;
+
   return (
     <div 
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       style={{ 
-        position: 'relative', 
-        borderRadius: '8px', 
-        overflow: 'hidden', 
-        border: '1px solid var(--border-color)',
-        maxHeight: '260px',
-        background: '#111',
-        marginBottom: '8px'
+        position: "relative", 
+        borderRadius: "8px", 
+        overflow: "hidden", 
+        border: "1px solid var(--border-color)",
+        maxHeight: "260px",
+        background: "#111",
+        marginBottom: "8px"
       }}
     >
       <img 
-        src={imageUrl} 
+        src={formattedSrc} 
         alt="generated art" 
         style={{ width: '100%', display: 'block', objectFit: 'contain', cursor: 'pointer' }}
         onClick={onEnlarge}

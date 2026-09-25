@@ -16,7 +16,7 @@ describe('ImageModal Component', () => {
     render(
       <ImageModal
         isOpen={true}
-        imageUrl="http://localhost:8000/api/chat/image/view?filename=cyber.png"
+        imageUrl="/api/chat/image/view?filename=cyber.png"
         prompt="neon cityscape 8k octane"
         onClose={handleClose}
       />

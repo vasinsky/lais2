@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../../config";
 import React, { useEffect, useState, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { Save, Code, RotateCcw, FileText, AlertCircle } from 'lucide-react';
@@ -33,7 +34,7 @@ export default function CenterEditor({
 
   const fetchCurrentFile = () => {
     if (!activeProject || !activeFile || activeFile.type === 'image') return;
-    fetch(`http://localhost:8000/api/projects/${activeProject}/file?path=${encodeURIComponent(activeFile.path)}`)
+    fetch(`${API_BASE_URL}/projects/${activeProject}/file?path=${encodeURIComponent(activeFile.path)}`)
       .then(res => res.json())
       .then(d => {
         const text = d.content || '';
@@ -70,7 +71,7 @@ export default function CenterEditor({
     setSaving(true);
 
     try {
-      const res = await fetch(`http://localhost:8000/api/projects/${activeProject}/file`, {
+      const res = await fetch(`${API_BASE_URL}/projects/${activeProject}/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: activeFile.path, content: editorContent })
@@ -108,7 +109,7 @@ export default function CenterEditor({
     const targetTimestamp = selectedHistoryItem.timestamp;
 
     try {
-      const res = await fetch(`http://localhost:8000/api/projects/${activeProject}/file`, {
+      const res = await fetch(`${API_BASE_URL}/projects/${activeProject}/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: activeFile.path, content: targetContent })
@@ -278,7 +279,7 @@ export default function CenterEditor({
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-panel)' }}>
             <img 
-              src={`http://localhost:8000/api/projects/${activeProject}/file?path=${encodeURIComponent(activeFile.path)}`} 
+              src={`/api/projects/${activeProject}/file?path=${encodeURIComponent(activeFile.path)}`} 
               alt={activeFile.path}
               style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '4px', border: '1px solid var(--border-color)' }}
             />

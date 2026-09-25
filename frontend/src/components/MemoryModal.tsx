@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import React, { useState, useEffect } from 'react';
 import { X, Trash2, Plus, Edit2, Check, BrainCircuit, ToggleLeft, ToggleRight } from 'lucide-react';
 
@@ -22,7 +23,7 @@ export default function MemoryModal({ isOpen, onClose }: Props) {
   const [editText, setEditText] = useState('');
 
   const loadPrompts = () => {
-    fetch('http://localhost:8000/api/prompts/')
+    fetch(`${API_BASE_URL}/prompts/`)
       .then(res => res.json())
       .then(data => setPrompts(data || []))
       .catch(console.error);
@@ -38,7 +39,7 @@ export default function MemoryModal({ isOpen, onClose }: Props) {
     e.preventDefault();
     if (!newPromptText.trim()) return;
     setLoading(true);
-    fetch('http://localhost:8000/api/prompts/', {
+    fetch(`${API_BASE_URL}/prompts/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: newPromptText.trim() })
@@ -62,7 +63,7 @@ export default function MemoryModal({ isOpen, onClose }: Props) {
 
   const handleSaveEdit = (id: string) => {
     if (!editText.trim()) return;
-    fetch(`http://localhost:8000/api/prompts/${id}`, {
+    fetch(`${API_BASE_URL}/prompts/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: editText.trim() })
@@ -74,12 +75,12 @@ export default function MemoryModal({ isOpen, onClose }: Props) {
   };
 
   const handleToggleActive = (id: string) => {
-    fetch(`http://localhost:8000/api/prompts/${id}/toggle`, { method: 'POST' })
+    fetch(`${API_BASE_URL}/prompts/${id}/toggle`, { method: 'POST' })
       .then(loadPrompts);
   };
 
   const handleDelete = (id: string) => {
-    fetch(`http://localhost:8000/api/prompts/${id}`, { method: 'DELETE' })
+    fetch(`${API_BASE_URL}/prompts/${id}`, { method: 'DELETE' })
       .then(loadPrompts);
   };
 

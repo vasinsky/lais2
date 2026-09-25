@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import React, { useEffect, useState } from 'react';
 import { Layers, Sparkles, Moon, Sun, BrainCircuit } from 'lucide-react';
 
@@ -25,7 +26,7 @@ export default function Header({
   const [rulesCount, setRulesCount] = useState<number>(0);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/status')
+    fetch(`${API_BASE_URL}/status`)
       .then(res => res.json())
       .then(data => {
         if (data.ollama && data.ollama.models) {
@@ -51,7 +52,7 @@ export default function Header({
       })
       .catch(console.error);
 
-    fetch('http://localhost:8000/api/prompts/')
+    fetch(`${API_BASE_URL}/prompts/`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {

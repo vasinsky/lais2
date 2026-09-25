@@ -12,7 +12,7 @@ from .projects import init_project_structure
 from comfy_service import generate_image_stream, interrupt_execution, COMFYUI_HTTP
 
 router = APIRouter()
-WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/workspace")
+WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/projects")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 
 TRANSLATOR_MODEL = "dolphin-llama3:latest"

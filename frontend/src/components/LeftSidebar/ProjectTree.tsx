@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { API_BASE_URL } from "../../config";
+import React, { useState, useEffect } from 'react';
 import { 
-  Folder, FolderOpen, FileCode, FileImage, Trash2, 
-  ChevronRight, ChevronDown, Plus, RefreshCw, EyeOff
+  Folder, 
+  FolderOpen, 
+  FileCode, 
+  FileImage, 
+  RotateCw, 
+  History, 
+  Trash2, 
+  Clock, 
+  ChevronRight, 
+  ChevronDown 
 } from 'lucide-react';
 import { useToast } from '../Toast';
 
@@ -9,28 +18,27 @@ export interface FileHistoryItem {
   id: string;
   timestamp: string;
   source: string;
-  patch?: string;
-  content?: string;
+  content: string;
 }
 
-interface FileNode {
+interface TreeItem {
   name: string;
   path: string;
   type: 'file' | 'directory';
-  file_type?: 'code' | 'image' | 'other';
-  children?: FileNode[];
+  file_type: 'code' | 'image' | 'other';
+  children?: TreeItem[];
 }
 
-interface Props {
+interface ProjectTreeProps {
   activeProject: string | null;
-  activeFilePath?: string | null;
+  activeFilePath: string | null;
   fileHistory: FileHistoryItem[];
   selectedHistoryId: string | null;
   refreshTrigger: number;
-  onSelectProject: (proj: string) => void;
+  onSelectProject: (name: string) => void;
   onOpenFile: (path: string, type: 'code' | 'image') => void;
   onCloseFile: () => void;
-  onSelectHistoryItem: (item: FileHistoryItem) => void;
+  onSelectHistoryItem: (item: FileHistoryItem | null) => void;
   onHistoryCleared: () => void;
 }
 
@@ -45,228 +53,203 @@ export default function ProjectTree({
   onCloseFile,
   onSelectHistoryItem,
   onHistoryCleared
-}: Props) {
-  const { showToast } = useToast();
+}: ProjectTreeProps) {
   const [projects, setProjects] = useState<string[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
-  const [projectFiles, setProjectFiles] = useState<Record<string, FileNode[]>>({});
+  const [treeData, setTreeData] = useState<Record<string, TreeItem[]>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-  const [folderContents, setFolderContents] = useState<Record<string, FileNode[]>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const { addToast } = useToast();
 
-  const loadProjects = useCallback(() => {
-    fetch('http://localhost:8000/api/projects')
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          const names = data.map((p: any) => typeof p === 'string' ? p : p.name);
-          setProjects(names);
-        }
-      })
-      .catch(() => setProjects([]));
-  }, []);
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects`);
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data);
+      }
+    } catch (e) {
+      console.error('Failed to load projects', e);
+    }
+  };
 
-  const loadProjectFiles = useCallback((proj: string) => {
-    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/tree`)
-      .then(res => res.json())
-      .then(data => {
-        setProjectFiles(prev => ({ ...prev, [proj]: Array.isArray(data) ? data : [] }));
-      })
-      .catch(() => {
-        setProjectFiles(prev => ({ ...prev, [proj]: [] }));
-      });
-  }, []);
+  const fetchTree = async (projectName: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects/${projectName}/tree`);
+      if (res.ok) {
+        const data = await res.json();
+        setTreeData(prev => ({ ...prev, [projectName]: data }));
+      }
+    } catch (e) {
+      console.error(`Failed to load tree for ${projectName}`, e);
+    }
+  };
 
-  const loadFolderContents = useCallback((proj: string, folderPath: string) => {
-    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/tree?subpath=${encodeURIComponent(folderPath)}`)
-      .then(res => res.json())
-      .then(data => {
-        setFolderContents(prev => ({ ...prev, [`${proj}:${folderPath}`]: Array.isArray(data) ? data : [] }));
-      })
-      .catch(() => {});
-  }, []);
-
-  // Перезагрузка при внешнем триггере
   useEffect(() => {
-    loadProjects();
+    fetchProjects();
+  }, [refreshTrigger]);
+
+  useEffect(() => {
     if (activeProject) {
-      loadProjectFiles(activeProject);
-      // Сбрасываем и перезапрашиваем все раскрытые папки
-      Object.keys(expandedFolders).forEach(key => {
-        if (expandedFolders[key] && key.startsWith(`${activeProject}:`)) {
-          const folderPath = key.replace(`${activeProject}:`, '');
-          loadFolderContents(activeProject, folderPath);
-        }
-      });
+      fetchTree(activeProject);
+      setExpandedFolders(prev => ({ ...prev, [activeProject]: true }));
     }
-  }, [refreshTrigger, activeProject, loadProjects, loadProjectFiles, loadFolderContents]);
+  }, [activeProject, refreshTrigger]);
 
-  // Авто-разворачивание активного проекта
-  useEffect(() => {
-    if (activeProject && !expandedProjects[activeProject]) {
-      setExpandedProjects(prev => ({ ...prev, [activeProject]: true }));
-      loadProjectFiles(activeProject);
-    }
-  }, [activeProject, expandedProjects, loadProjectFiles]);
-
-  const toggleProject = (proj: string) => {
-    const isNext = !expandedProjects[proj];
-    setExpandedProjects(prev => ({ ...prev, [proj]: isNext }));
-    onSelectProject(proj);
-    if (isNext) {
-      loadProjectFiles(proj);
+  const toggleFolder = (folderKey: string, projectName?: string) => {
+    const isExpanding = !expandedFolders[folderKey];
+    setExpandedFolders(prev => ({ ...prev, [folderKey]: isExpanding }));
+    if (isExpanding && projectName) {
+      fetchTree(projectName);
     }
   };
 
-  const toggleFolder = (proj: string, folderPath: string) => {
-    const key = `${proj}:${folderPath}`;
-    const isNext = !expandedFolders[key];
-    setExpandedFolders(prev => ({ ...prev, [key]: isNext }));
-    if (isNext) {
-      loadFolderContents(proj, folderPath);
+  const handleClearHistory = async () => {
+    if (!activeProject || !activeFilePath) return;
+    try {
+      const res = await fetch(
+        `/api/projects/${activeProject}/history?path=${encodeURIComponent(activeFilePath)}`, 
+        { method: 'DELETE' }
+      );
+      if (res.ok) {
+        onHistoryCleared();
+        addToast('File history cleared', 'info');
+      }
+    } catch (e) {
+      addToast('Failed to clear file history', 'error');
     }
   };
 
-  const renderFileNode = (node: FileNode, proj: string, depth: number = 1) => {
-    const isDir = node.type === 'directory';
-    const folderKey = `${proj}:${node.path}`;
-    const isFolderExpanded = !!expandedFolders[folderKey];
-    const isSelected = activeFilePath === node.path;
-
-    if (isDir) {
-      const children = folderContents[folderKey] || [];
-      return (
-        <div key={node.path}>
-          <div 
-            onClick={() => toggleFolder(proj, node.path)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '3px 8px',
-              paddingLeft: `${depth * 14}px`,
-              cursor: 'pointer',
-              fontSize: '11.5px',
-              gap: '5px',
-              borderRadius: '4px',
-              color: 'var(--text-main)',
-              userSelect: 'none'
-            }}
-            className="tree-node"
-          >
-            {isFolderExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {isFolderExpanded ? <FolderOpen size={13} color="var(--btn-primary)" /> : <Folder size={13} color="var(--btn-primary)" />}
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
-          </div>
-
-          {isFolderExpanded && (
-            <div>
-              {children.map(child => renderFileNode(child, proj, depth + 1))}
+  const renderTreeNodes = (items: TreeItem[], projName: string) => {
+    return items.map((node) => {
+      const isSelected = activeFilePath === node.path && activeProject === projName;
+      if (node.type === 'directory') {
+        const folderKey = `${projName}:${node.path}`;
+        const isExpanded = !!expandedFolders[folderKey];
+        return (
+          <div key={node.path} style={{ marginLeft: 12 }}>
+            <div 
+              onClick={() => toggleFolder(folderKey)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 6px',
+                cursor: 'pointer',
+                borderRadius: 4,
+                fontSize: 12.5,
+                color: 'var(--text-main)'
+              }}
+            >
+              {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              {isExpanded ? <FolderOpen size={14} color="#3b82f6" /> : <Folder size={14} color="#3b82f6" />}
+              <span>{node.name}</span>
             </div>
+            {isExpanded && node.children && renderTreeNodes(node.children, projName)}
+          </div>
+        );
+      }
+
+      return (
+        <div
+          key={node.path}
+          onClick={() => {
+            if (activeProject !== projName) {
+              onSelectProject(projName);
+            }
+            onOpenFile(node.path, node.file_type === 'image' ? 'image' : 'code');
+          }}
+          style={{
+            marginLeft: 18,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '3px 6px',
+            cursor: 'pointer',
+            borderRadius: 4,
+            fontSize: 12,
+            background: isSelected ? 'var(--bg-active-item, rgba(59, 130, 246, 0.15))' : 'transparent',
+            color: isSelected ? 'var(--primary-color, #2563eb)' : 'var(--text-muted)'
+          }}
+        >
+          {node.file_type === 'image' ? (
+            <FileImage size={13} color="#10b981" />
+          ) : (
+            <FileCode size={13} color="#64748b" />
           )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {node.name}
+          </span>
         </div>
       );
-    }
-
-    const isImage = node.file_type === 'image' || node.name.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i);
-
-    return (
-      <div
-        key={node.path}
-        onClick={() => onOpenFile(node.path, isImage ? 'image' : 'code')}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '3px 8px',
-          paddingLeft: `${depth * 14 + 12}px`,
-          cursor: 'pointer',
-          fontSize: '11.5px',
-          gap: '6px',
-          borderRadius: '4px',
-          background: isSelected ? 'var(--hover-item)' : 'transparent',
-          color: isSelected ? 'var(--btn-primary)' : 'var(--text-main)',
-          fontWeight: isSelected ? 600 : 400,
-          userSelect: 'none'
-        }}
-        className="tree-node"
-      >
-        {isImage ? <FileImage size={13} color="#10b981" /> : <FileCode size={13} color="var(--text-muted)" />}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
-      </div>
-    );
+    });
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)' }}>
-      {/* Шапка дерева */}
+      {/* Header */}
       <div style={{
-        padding: '10px 12px',
-        borderBottom: '1px solid var(--border-color)',
+        height: 38,
+        padding: '0 12px',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between'
+        justifyContent: 'space-between',
+        borderBottom: '1px solid var(--border-color)'
       }}>
-        <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-          Projects Tree
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+          PROJECTS TREE
         </span>
         <button
           onClick={() => {
-            loadProjects();
-            if (activeProject) loadProjectFiles(activeProject);
-            showToast("Projects tree refreshed", "info");
+            fetchProjects();
+            if (activeProject) fetchTree(activeProject);
           }}
           className="theme-toggle-btn"
-          title="Refresh tree"
-          style={{ padding: '2px 5px' }}
+          style={{ padding: 4 }}
+          title="Refresh Projects Tree"
         >
-          <RefreshCw size={12} />
+          <RotateCw size={13} />
         </button>
       </div>
 
-      {/* Список проектов и файлов */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
+      {/* Projects List */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
         {projects.length === 0 ? (
-          <div style={{ padding: '20px 10px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11.5px' }}>
-            No projects found
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 20 }}>
+            No projects in workspace
           </div>
         ) : (
-          projects.map(proj => {
-            const isExpanded = !!expandedProjects[proj];
-            const isCurrent = activeProject === proj;
-            const files = projectFiles[proj] || [];
-
+          projects.map((proj) => {
+            const isProjExpanded = !!expandedFolders[proj];
+            const isProjActive = activeProject === proj;
             return (
-              <div key={proj} style={{ marginBottom: '2px' }}>
+              <div key={proj} style={{ marginBottom: 4 }}>
                 <div
-                  onClick={() => toggleProject(proj)}
+                  onClick={() => {
+                    onSelectProject(proj);
+                    toggleFolder(proj, proj);
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '5px 8px',
-                    borderRadius: '5px',
+                    gap: 6,
+                    padding: '4px 8px',
+                    borderRadius: 5,
                     cursor: 'pointer',
-                    background: isCurrent ? 'var(--hover-item)' : 'transparent',
-                    color: isCurrent ? 'var(--btn-primary)' : 'var(--text-main)',
-                    fontWeight: isCurrent ? 600 : 500,
-                    fontSize: '12px'
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background: isProjActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                    color: isProjActive ? 'var(--primary-color, #2563eb)' : 'var(--text-main)'
                   }}
-                  className="tree-node"
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                    {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    {isExpanded ? <FolderOpen size={14} color="var(--btn-primary)" /> : <Folder size={14} color="var(--btn-primary)" />}
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{proj}</span>
-                  </div>
+                  {isProjExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {isProjExpanded ? <FolderOpen size={15} color="#3b82f6" /> : <Folder size={15} color="#3b82f6" />}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {proj}
+                  </span>
                 </div>
-
-                {isExpanded && (
-                  <div style={{ marginTop: '2px' }}>
-                    {files.length === 0 ? (
-                      <div style={{ padding: '4px 8px 4px 28px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                        Empty folder
-                      </div>
-                    ) : (
-                      files.map(node => renderFileNode(node, proj, 1))
-                    )}
+                {isProjExpanded && treeData[proj] && (
+                  <div style={{ marginTop: 2 }}>
+                    {renderTreeNodes(treeData[proj], proj)}
                   </div>
                 )}
               </div>
@@ -275,57 +258,93 @@ export default function ProjectTree({
         )}
       </div>
 
-      {/* Панель истории файла */}
-      {fileHistory.length > 0 && (
+      {/* Persistent File History Block */}
+      {true && (
         <div style={{
+          height: 180,
           borderTop: '1px solid var(--border-color)',
-          maxHeight: '160px',
+          background: 'var(--bg-editor, #fafafa)',
           display: 'flex',
-          flexDirection: 'column',
-          background: 'var(--bg-panel-sub)'
+          flexDirection: 'column'
         }}>
           <div style={{
-            padding: '6px 10px',
-            borderBottom: '1px solid var(--border-color)',
+            height: 30,
+            padding: '0 10px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            fontSize: '10.5px',
-            fontWeight: 600,
-            color: 'var(--text-muted)'
+            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-panel)'
           }}>
-            <span>FILE HISTORY</span>
-            <button
-              onClick={onHistoryCleared}
-              className="theme-toggle-btn"
-              title="Clear history"
-              style={{ padding: '1px 4px' }}
-            >
-              <Trash2 size={11} color="#ef4444" />
-            </button>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '4px' }}>
-            {fileHistory.map(item => (
-              <div
-                key={item.id}
-                onClick={() => onSelectHistoryItem(item)}
-                style={{
-                  padding: '4px 6px',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  background: selectedHistoryId === item.id ? 'var(--hover-item)' : 'transparent',
-                  color: selectedHistoryId === item.id ? 'var(--btn-primary)' : 'var(--text-main)',
-                  display: 'flex',
-                  justifyContent: 'space-between'
-                }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <History size={12} color="var(--primary-color, #2563eb)" />
+              <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+                FILE HISTORY ({fileHistory.length})
+              </span>
+            </div>
+            {fileHistory.length > 0 && (
+              <button
+                onClick={handleClearHistory}
+                className="theme-toggle-btn"
+                style={{ padding: '2px 4px', border: 'none' }}
+                title="Clear revision history"
               >
-                <span>{item.source}</span>
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                  {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <Trash2 size={12} color="#ef4444" />
+              </button>
+            )}
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px' }}>
+            {fileHistory.length === 0 ? (
+              <div style={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                fontSize: 11, 
+                color: 'var(--text-muted)',
+                textAlign: 'center',
+                padding: '0 8px'
+              }}>
+                <span>No revisions yet</span>
+                <span style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>
+                  Press Ctrl+S / Save to record snapshots
                 </span>
               </div>
-            ))}
+            ) : (
+              fileHistory.map((item) => {
+                const isSelected = selectedHistoryId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => onSelectHistoryItem(isSelected ? null : item)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 4,
+                      marginBottom: 3,
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                      background: isSelected ? 'var(--primary-color, #2563eb)' : 'var(--bg-panel)',
+                      color: isSelected ? '#ffffff' : 'var(--text-main)',
+                      border: '1px solid var(--border-color)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {new Date(item.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' })}
+                      </span>
+                      <span style={{ fontSize: 9.5, opacity: 0.8, textTransform: 'capitalize' }}>
+                        {(item.source || 'save').replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

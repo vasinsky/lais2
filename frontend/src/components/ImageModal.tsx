@@ -102,7 +102,7 @@ export default function ImageModal({ isOpen, imageUrl, prompt, onClose }: Props)
 
         <div style={{ padding: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', maxHeight: '72vh', overflow: 'hidden' }}>
           <img 
-            src={imageUrl} 
+            src={(imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("data:")) ? imageUrl : `data:image/png;base64,${imageUrl}`} 
             alt="Generated high-res"
             style={{ 
               maxWidth: '100%', 

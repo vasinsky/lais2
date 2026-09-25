@@ -22,15 +22,15 @@ services:
       - HTTPS_PROXY=socks5://host.docker.internal:10808
       - ALL_PROXY=socks5://host.docker.internal:10808
       - NO_PROXY=127.0.0.1,localhost,host.docker.internal,mongo
-      - PROJECTS_ROOT_DIR=${PROJECTS_ROOT_DIR}
+      - PROJECTS_ROOT_DIR=/app/projects
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
-      - studio_workspace:/app/workspace
+      - ${PROJECTS_DIR:-./projects}:/app/projects
     depends_on:
       - mongo
-    command: /app/entrypoint.sh  
+    command: /app/entrypoint.sh
 
   frontend:
     build: ./frontend
@@ -43,8 +43,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
-    command: /app/entrypoint.sh  
+    command: /app/entrypoint.sh
 
 volumes:
   mongo_data:
-  studio_workspace:

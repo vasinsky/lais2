@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "./config";
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import ProjectTree, { FileHistoryItem } from './components/LeftSidebar/ProjectTree';
@@ -45,7 +46,7 @@ export default function App() {
       setSelectedHistoryItem(null);
       return;
     }
-    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/history?path=${encodeURIComponent(filePath)}`)
+    fetch(`${API_BASE_URL}/projects/${encodeURIComponent(proj)}/history?path=${encodeURIComponent(filePath)}`)
       .then(res => res.json())
       .then((data: FileHistoryItem[]) => {
         setFileHistory(Array.isArray(data) ? data : []);

@@ -87,7 +87,7 @@ describe('ProjectTree Component', () => {
       </ToastProvider>
     );
 
-    expect(screen.getByText('FILE HISTORY')).toBeInTheDocument();
+    expect(screen.getByText(/FILE HISTORY/i)).toBeInTheDocument();
     const revItem = screen.getByText('Agent refactor');
     fireEvent.click(revItem);
     expect(mockSelectHistory).toHaveBeenCalledWith(history[1]);
