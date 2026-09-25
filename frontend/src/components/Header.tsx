@@ -1,126 +1,88 @@
 import React, { useEffect, useState } from 'react';
-import { Cpu, Image as ImageIcon, Sun, Moon, Layers, BrainCircuit } from 'lucide-react';
-
-interface ServiceStatus {
-  online: boolean;
-  url: string;
-  count: number;
-  error?: string | null;
-}
+import { Layers, Sparkles, Moon, Sun, BrainCircuit } from 'lucide-react';
 
 interface Props {
   selectedOllama: string;
-  onSelectOllama: (v: string) => void;
+  onSelectOllama: (val: string) => void;
   selectedComfy: string;
-  onSelectComfy: (v: string) => void;
+  onSelectComfy: (val: string) => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenMemory: () => void;
 }
 
-export default function Header({ 
-  selectedOllama, 
-  onSelectOllama, 
-  selectedComfy, 
+export default function Header({
+  selectedOllama,
+  onSelectOllama,
+  selectedComfy,
   onSelectComfy,
   theme,
   onToggleTheme,
   onOpenMemory
 }: Props) {
-  const [ollamaStatus, setOllamaStatus] = useState<ServiceStatus>({ online: false, url: '', count: 0 });
-  const [comfyStatus, setComfyStatus] = useState<ServiceStatus>({ online: false, url: '', count: 0 });
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [comfyModels, setComfyModels] = useState<string[]>([]);
+  const [comfyCheckpoints, setComfyCheckpoints] = useState<string[]>([]);
   const [rulesCount, setRulesCount] = useState<number>(0);
 
-  const fetchStatus = () => {
-    fetch('http://localhost:8000/api/system/status')
+  useEffect(() => {
+    fetch('http://localhost:8000/api/status')
       .then(res => res.json())
       .then(data => {
-        setOllamaStatus({
-          online: data.ollama.online,
-          url: data.ollama.url,
-          count: data.ollama.count,
-          error: data.ollama.error
-        });
-        setComfyStatus({
-          online: data.comfy.online,
-          url: data.comfy.url,
-          count: data.comfy.count,
-          error: data.comfy.error
-        });
-        setOllamaModels(data.ollama.models || []);
-        setComfyModels(data.comfy.checkpoints || []);
-      })
-      .catch(() => {});
-  };
+        if (data.ollama && data.ollama.models) {
+          const names: string[] = data.ollama.models.map((m: any) => m.name);
+          setOllamaModels(names);
 
-  const checkRules = () => {
+          // Дефолт: qwen2.5-coder:7b-instruct-q4_K_M или любая qwen-coder
+          const preferredCoder = names.find((n: string) => n.includes('qwen2.5-coder:7b-instruct-q4_K_M'))
+            || names.find((n: string) => n.includes('qwen2.5-coder'))
+            || names.find((n: string) => n.includes('coder'))
+            || names[0];
+
+          if (preferredCoder && (!selectedOllama || selectedOllama === 'dolphin-llama3:latest')) {
+            onSelectOllama(preferredCoder);
+          }
+        }
+        if (data.comfyui && data.comfyui.checkpoints) {
+          setComfyCheckpoints(data.comfyui.checkpoints);
+          if (data.comfyui.checkpoints.length > 0 && !selectedComfy) {
+            onSelectComfy(data.comfyui.checkpoints[0]);
+          }
+        }
+      })
+      .catch(console.error);
+
     fetch('http://localhost:8000/api/prompts/')
       .then(res => res.json())
-      .then(prompts => {
-        setRulesCount(Array.isArray(prompts) ? prompts.length : 0);
+      .then(data => {
+        if (Array.isArray(data)) {
+          setRulesCount(data.filter(r => r.is_active).length);
+        }
       })
-      .catch(() => {});
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    checkRules();
-    const interval = setInterval(() => {
-      fetchStatus();
-      checkRules();
-    }, 8000);
-    return () => clearInterval(interval);
+      .catch(console.error);
   }, []);
 
   return (
     <header className="studio-header">
-      {/* Brand logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div style={{
-          width: '26px', height: '26px', borderRadius: '7px',
-          background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
-          boxShadow: '0 2px 8px rgba(59, 130, 246, 0.35)'
-        }}>
-          <Layers size={15} />
-        </div>
-        <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.03em', color: 'var(--text-main)' }}>
+        <img 
+          src="/favicon.svg" 
+          alt="VAIS Logo" 
+          style={{ width: '24px', height: '24px', borderRadius: '50%' }}
+        />
+        <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--text-main)' }}>
           LOCAL AI STUDIO
         </span>
       </div>
 
-      {/* Action Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {/* Ollama selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div className="tooltip-container" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: ollamaStatus.online ? '#10b981' : '#ef4444',
-              boxShadow: ollamaStatus.online ? '0 0 6px #10b981' : '0 0 6px #ef4444',
-              display: 'inline-block'
-            }} />
-            <div className="tooltip-bubble">
-              <div style={{ fontWeight: 600, marginBottom: '4px', color: ollamaStatus.online ? '#10b981' : '#ef4444' }}>
-                Ollama: {ollamaStatus.online ? 'Online' : 'Offline'}
-              </div>
-              <div><b>Endpoint:</b> {ollamaStatus.url}</div>
-              <div><b>Available Models:</b> {ollamaStatus.count}</div>
-              {ollamaStatus.error && <div style={{ color: '#ef4444', marginTop: '4px' }}><b>Error:</b> {ollamaStatus.error}</div>}
-            </div>
-          </div>
-
-          <Cpu size={14} color="#3b82f6" />
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Ollama:</span>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+          <Layers size={14} color="var(--text-muted)" />
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>Ollama:</span>
           <select 
             value={selectedOllama} 
             onChange={e => onSelectOllama(e.target.value)}
             className="studio-select"
-            style={{ maxWidth: '190px' }}
           >
             {ollamaModels.map(m => (
               <option key={m} value={m}>{m}</option>
@@ -130,79 +92,40 @@ export default function Header({
 
         <div className="header-divider" />
 
-        {/* ComfyUI selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div className="tooltip-container" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: comfyStatus.online ? '#10b981' : '#ef4444',
-              boxShadow: comfyStatus.online ? '0 0 6px #10b981' : '0 0 6px #ef4444',
-              display: 'inline-block'
-            }} />
-            <div className="tooltip-bubble">
-              <div style={{ fontWeight: 600, marginBottom: '4px', color: comfyStatus.online ? '#10b981' : '#ef4444' }}>
-                ComfyUI: {comfyStatus.online ? 'Online' : 'Offline'}
-              </div>
-              <div><b>Endpoint:</b> {comfyStatus.url}</div>
-              <div><b>Checkpoints:</b> {comfyStatus.count}</div>
-              {comfyStatus.error && <div style={{ color: '#ef4444', marginTop: '4px' }}><b>Error:</b> {comfyStatus.error}</div>}
-            </div>
-          </div>
-
-          <ImageIcon size={14} color="#ec4899" />
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Comfy:</span>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+          <Sparkles size={14} color="var(--text-muted)" />
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>Comfy:</span>
           <select 
             value={selectedComfy} 
             onChange={e => onSelectComfy(e.target.value)}
             className="studio-select"
-            style={{ maxWidth: '190px' }}
           >
-            {comfyModels.map(m => (
-              <option key={m} value={m}>{m}</option>
+            {comfyCheckpoints.map(c => (
+              <option key={c} value={c}>{c}</option>
             ))}
           </select>
         </div>
 
         <div className="header-divider" />
 
-        {/* Memory Button */}
         <button 
           onClick={onOpenMemory}
           className="theme-toggle-btn"
-          style={{
-            background: rulesCount > 0 ? 'rgba(59, 130, 246, 0.12)' : 'var(--input-bg)',
-            borderColor: rulesCount > 0 ? 'var(--btn-primary)' : 'var(--input-border)',
-            fontWeight: 600,
-            padding: '5px 11px',
-            color: rulesCount > 0 ? 'var(--btn-primary)' : 'var(--text-main)'
-          }}
-          title="Open Global Memory and Rules"
+          title="Global Memory & System Rules"
+          style={{ gap: '6px', color: rulesCount > 0 ? 'var(--btn-primary)' : 'var(--text-muted)' }}
         >
-          <BrainCircuit size={15} color="var(--btn-primary)" />
-          <span>Memory ({rulesCount})</span>
+          <BrainCircuit size={14} color={rulesCount > 0 ? "var(--btn-primary)" : "currentColor"} />
+          <span style={{ fontWeight: 600 }}>Memory ({rulesCount})</span>
         </button>
 
-        <div className="header-divider" />
-
-        {/* Theme Toggle */}
         <button 
-          onClick={onToggleTheme}
+          onClick={onToggleTheme} 
           className="theme-toggle-btn"
-          title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          title={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
         >
-          {theme === 'light' ? (
-            <>
-              <Moon size={14} color="#64748b" />
-              <span>Dark</span>
-            </>
-          ) : (
-            <>
-              <Sun size={14} color="#f59e0b" />
-              <span>Light</span>
-            </>
-          )}
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
         </button>
       </div>
     </header>

@@ -1,47 +1,91 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   MessageSquare, Bot, Send, Paperclip, X, Square, Loader2, 
-  Sparkles, Copy, Check, Trash2, AlertTriangle 
+  Sparkles, Copy, Check, Trash2, AlertTriangle, FileCode2
 } from 'lucide-react';
+import { useToast } from '../Toast';
+import { FileHistoryItem } from '../LeftSidebar/ProjectTree';
 
 interface ChatMessage {
   role: string;
   content: string;
   images?: string[];
   modelUsed?: string;
+  isStreamingToFile?: boolean;
+  targetFile?: string;
 }
 
 interface Props {
+  mode: 'chat' | 'agent';
+  onModeChange: (m: 'chat' | 'agent') => void;
   activeProject: string | null;
+  activeFilePath?: string | null;
+  activeFileContent?: string;
   selectedOllama: string;
   selectedComfy: string;
+  onLiveStreamToEditor: (targetPath: string, codeChunk: string, isStart: boolean) => void;
+  onFileAutoSaved: (targetPath: string, rev: FileHistoryItem) => void;
 }
 
-export default function RightPanel({ activeProject, selectedOllama }: Props) {
-  const [mode, setMode] = useState<'chat' | 'agent'>('chat');
+export default function RightPanel({ 
+  mode,
+  onModeChange,
+  activeProject, 
+  activeFilePath,
+  activeFileContent,
+  selectedOllama,
+  onLiveStreamToEditor,
+  onFileAutoSaved
+}: Props) {
+  const { showToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [attachedImage, setAttachedImage] = useState<string | null>(null);
   
+  // Ключ черновика в localStorage зависит от режима и активного проекта
+  const getDraftKey = (targetMode: 'chat' | 'agent', proj: string | null) => {
+    return targetMode === 'chat' ? 'studio_draft_chat' : `studio_draft_agent_${proj || 'none'}`;
+  };
+
+  const [input, setInput] = useState<string>(() => {
+    return localStorage.getItem(getDraftKey(mode, activeProject)) || '';
+  });
+  
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeModelInfo, setActiveModelInfo] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // Храним последнее отправленное сообщение для восстановления при Stop
+  const lastSubmittedPromptRef = useRef<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Автоскролл
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // Восстановление черновика при смене режима или активного проекта
+  useEffect(() => {
+    const savedDraft = localStorage.getItem(getDraftKey(mode, activeProject)) || '';
+    setInput(savedDraft);
+  }, [mode, activeProject]);
+
+  // Сохранение черновика при каждом вводе
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInput(val);
+    localStorage.setItem(getDraftKey(mode, activeProject), val);
+  };
+
+  // Загрузка истории
   const loadHistory = () => {
     if (mode === 'chat') {
       fetch('http://localhost:8000/api/chat/history')
         .then(res => res.json())
         .then(data => setMessages(Array.isArray(data) ? data : []))
-        .catch(console.error);
+        .catch(() => setMessages([]));
     } else {
       if (!activeProject) {
         setMessages([]);
@@ -50,7 +94,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
       fetch(`http://localhost:8000/api/agent/${encodeURIComponent(activeProject)}/history`)
         .then(res => res.json())
         .then(data => setMessages(Array.isArray(data) ? data : []))
-        .catch(console.error);
+        .catch(() => setMessages([]));
     }
   };
 
@@ -62,20 +106,24 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
     setShowClearConfirm(false);
     if (mode === 'chat') {
       fetch('http://localhost:8000/api/chat/history', { method: 'DELETE' })
-        .then(() => setMessages([]));
+        .then(() => {
+          setMessages([]);
+          showToast("Global chat history cleared", "success");
+        });
     } else {
       if (!activeProject) return;
       fetch(`http://localhost:8000/api/agent/${encodeURIComponent(activeProject)}/history`, { method: 'DELETE' })
-        .then(() => setMessages([]));
+        .then(() => {
+          setMessages([]);
+          showToast(`Agent history cleared for "${activeProject}"`, "success");
+        });
     }
   };
 
   const handleCopyMessage = (text: string, index: number) => {
     navigator.clipboard.writeText(text);
     setCopiedIndex(index);
-    setTimeout(() => {
-      setCopiedIndex(null);
-    }, 2000);
+    setTimeout(() => setCopiedIndex(null), 2000);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,34 +133,13 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      const base64Pure = result.split(',')[1];
-      setAttachedImage(base64Pure);
+      setAttachedImage(result.split(',')[1]);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            setAttachedImage(result.split(',')[1]);
-          };
-          reader.readAsDataURL(file);
-          e.preventDefault();
-          break;
-        }
-      }
-    }
-  };
-
+  // Остановка генерации: возвращаем отправленное сообщение обратно в поле ввода
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -120,20 +147,32 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
     }
     setLoading(false);
     setActiveModelInfo(null);
+
+    // Восстанавливаем отправленный текст обратно в инпут и черновик
+    if (lastSubmittedPromptRef.current) {
+      setInput(lastSubmittedPromptRef.current);
+      localStorage.setItem(getDraftKey(mode, activeProject), lastSubmittedPromptRef.current);
+    }
   };
 
   const sendMessage = async () => {
     if ((!input.trim() && !attachedImage) || loading) return;
 
+    const submittedText = input.trim();
+    lastSubmittedPromptRef.current = submittedText;
+
     const userMsg: ChatMessage = {
       role: 'user',
-      content: input,
+      content: submittedText,
       images: attachedImage ? [attachedImage] : undefined
     };
 
     const nextMessages = [...messages, userMsg];
     setMessages(nextMessages);
+
+    // Очищаем инпут и сохранённый черновик текущей вкладки
     setInput('');
+    localStorage.removeItem(getDraftKey(mode, activeProject));
     setAttachedImage(null);
     setLoading(true);
 
@@ -152,11 +191,17 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
       : { 
           project_name: activeProject, 
           prompt: userMsg.content, 
-          model: selectedOllama 
+          model: selectedOllama,
+          active_file_path: activeFilePath,
+          active_file_content: activeFileContent
         };
 
     const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
     setMessages(prev => [...prev, assistantMsg]);
+
+    let streamingToFile = false;
+    let targetFilePath = '';
+    let isFirstChunk = true;
 
     try {
       const res = await fetch(endpoint, {
@@ -185,10 +230,32 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
                   continue;
                 }
 
+                if (data.type === 'stream_target') {
+                  streamingToFile = true;
+                  targetFilePath = data.file_path;
+                  assistantMsg.isStreamingToFile = true;
+                  assistantMsg.targetFile = targetFilePath;
+                  assistantMsg.content = `Writing code directly into \`${targetFilePath}\`...`;
+                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
+                  continue;
+                }
+
+                if (data.type === 'file_saved') {
+                  assistantMsg.content = `Code written and saved to \`${data.file_path}\`.`;
+                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
+                  onFileAutoSaved(data.file_path, data.revision);
+                  continue;
+                }
+
                 const token = data.message?.content || '';
-                assistantMsg.content += token;
-                setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
-              } catch (e) {}
+                if (streamingToFile) {
+                  onLiveStreamToEditor(targetFilePath, token, isFirstChunk);
+                  isFirstChunk = false;
+                } else {
+                  assistantMsg.content += token;
+                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
+                }
+              } catch (_) {}
             }
           }
         }
@@ -197,8 +264,6 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
       if (err.name === 'AbortError') {
         assistantMsg.content += ' [stopped by user]';
         setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
-      } else {
-        console.error(err);
       }
     } finally {
       setLoading(false);
@@ -227,7 +292,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
           gap: '2px'
         }}>
           <button 
-            onClick={() => setMode('chat')}
+            onClick={() => onModeChange('chat')}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', fontSize: '12px',
               fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
@@ -242,7 +307,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
           </button>
           
           <button 
-            onClick={() => setMode('agent')}
+            onClick={() => onModeChange('agent')}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', fontSize: '12px',
               fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
@@ -257,7 +322,6 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
           </button>
         </div>
 
-        {/* Right header controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {mode === 'agent' ? (activeProject ? `📂 ${activeProject}` : '⚠️ No Project') : '🌐 Global'}
@@ -297,7 +361,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
                 position: 'relative',
                 padding: '10px 14px',
                 borderRadius: '9px',
-                maxWidth: '85%',
+                maxWidth: '88%',
                 alignSelf: isUser ? 'flex-end' : 'flex-start',
                 background: isUser ? '#3574f0' : 'var(--bg-card)',
                 color: isUser ? '#ffffff' : 'var(--text-main)',
@@ -311,7 +375,6 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
                 userSelect: 'text'
               }}
             >
-              {/* Floating Copy Button */}
               {m.content && (
                 <button
                   onClick={() => handleCopyMessage(m.content, i)}
@@ -338,36 +401,35 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
                 </button>
               )}
 
-              {/* Uploaded images render */}
               {m.images && m.images.map((imgBase64, idx) => (
                 <img 
                   key={idx}
                   src={`data:image/jpeg;base64,${imgBase64}`}
-                  alt="user upload"
-                  style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '6px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.3)' }}
+                  alt="upload"
+                  style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '6px', objectFit: 'cover' }}
                 />
               ))}
 
-              {/* Model badge */}
               {m.role === 'assistant' && m.modelUsed && (
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   via {m.modelUsed}
                 </div>
               )}
 
-              {/* Text content */}
-              <span style={{ 
-                whiteSpace: 'pre-wrap', 
-                paddingRight: m.content ? '18px' : '0',
-                color: isUser ? '#ffffff' : 'inherit'
-              }}>
-                {m.content}
-              </span>
+              {m.isStreamingToFile ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}>
+                  <FileCode2 size={16} />
+                  <span>{m.content}</span>
+                </div>
+              ) : (
+                <span style={{ whiteSpace: 'pre-wrap', color: isUser ? '#ffffff' : 'inherit' }}>
+                  {m.content}
+                </span>
+              )}
             </div>
           );
         })}
 
-        {/* Loading Spinner Indicator */}
         {loading && (
           <div style={{
             alignSelf: 'flex-start',
@@ -385,14 +447,14 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
             <span>
               {activeModelInfo 
                 ? `Running ${activeModelInfo}...` 
-                : (attachedImage ? 'Analyzing image via minicpm-v...' : 'Thinking...')}
+                : (mode === 'agent' ? `Agent working in ${activeProject}...` : 'Thinking...')}
             </span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Field Container */}
+      {/* Input */}
       <div style={{ padding: '8px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-panel)' }}>
         {attachedImage && (
           <div style={{
@@ -415,7 +477,6 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
             <button 
               onClick={() => setAttachedImage(null)}
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-muted)' }}
-              title="Remove image"
             >
               <X size={14} />
             </button>
@@ -434,7 +495,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
           <button 
             onClick={() => fileInputRef.current?.click()}
             className="theme-toggle-btn"
-            title="Attach image for analysis (or paste Cmd+V)"
+            title="Attach image"
             style={{ padding: '6px 8px' }}
           >
             <Paperclip size={14} color={attachedImage ? "#3574f0" : "var(--text-muted)"} />
@@ -442,10 +503,9 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
 
           <input 
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={e => e.key === 'Enter' && !loading && sendMessage()}
-            onPaste={handlePaste}
-            placeholder={attachedImage ? "Ask a question about this image..." : (mode === 'chat' ? 'Ask anything...' : 'Instruct agent to modify code...')}
+            placeholder={attachedImage ? "Ask a question about this image..." : (mode === 'chat' ? 'Ask anything...' : `Instruct agent working on ${activeProject || 'project'}...`)}
             className="studio-input"
             style={{ flex: 1 }}
           />
@@ -466,7 +526,7 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
                 fontSize: '11px',
                 fontWeight: 600
               }}
-              title="Stop generation"
+              title="Stop generation & restore prompt"
             >
               <Square size={12} fill="#fff" />
               <span>Stop</span>
@@ -484,7 +544,6 @@ export default function RightPanel({ activeProject, selectedOllama }: Props) {
         </div>
       </div>
 
-      {/* Modal Confirm Clear History (100% English UI) */}
       {showClearConfirm && (
         <div style={{
           position: 'fixed',

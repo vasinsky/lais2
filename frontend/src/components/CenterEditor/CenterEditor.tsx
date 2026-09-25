@@ -9,8 +9,10 @@ interface Props {
   activeProject: string | null;
   theme: 'light' | 'dark';
   selectedHistoryItem: FileHistoryItem | null;
+  overrideContent?: string;
   onClearHistorySelection: () => void;
   onNewRevisionSaved: (rev: FileHistoryItem) => void;
+  onContentChange?: (code: string) => void;
 }
 
 export default function CenterEditor({ 
@@ -18,8 +20,10 @@ export default function CenterEditor({
   activeProject, 
   theme, 
   selectedHistoryItem,
+  overrideContent,
   onClearHistorySelection,
-  onNewRevisionSaved
+  onNewRevisionSaved,
+  onContentChange
 }: Props) {
   const { showToast } = useToast();
   const [currentDiskContent, setCurrentDiskContent] = useState('');
@@ -36,6 +40,7 @@ export default function CenterEditor({
         setCurrentDiskContent(text);
         if (!selectedHistoryItem) {
           setEditorContent(text);
+          if (onContentChange) onContentChange(text);
         }
       })
       .catch(() => showToast("Error loading file", "error"));
@@ -48,10 +53,10 @@ export default function CenterEditor({
   useEffect(() => {
     if (selectedHistoryItem) {
       setEditorContent(selectedHistoryItem.content);
-    } else {
-      setEditorContent(currentDiskContent);
+    } else if (overrideContent !== undefined && overrideContent !== editorContent) {
+      setEditorContent(overrideContent);
     }
-  }, [selectedHistoryItem, currentDiskContent]);
+  }, [selectedHistoryItem, overrideContent]);
 
   const handleSave = async () => {
     if (!activeProject || !activeFile || savingRef.current) return;
@@ -86,7 +91,7 @@ export default function CenterEditor({
       } else if (data.status === 'no_changes') {
         showToast("No changes to save", "warning");
       }
-    } catch (err) {
+    } catch {
       showToast("Failed to save file", "error");
     } finally {
       savingRef.current = false;
@@ -123,7 +128,7 @@ export default function CenterEditor({
         onNewRevisionSaved(data.revision);
       }
       showToast(`Reverted and applied revision (${targetTimestamp})`, "success");
-    } catch (err) {
+    } catch {
       showToast("Failed to revert file", "error");
     } finally {
       savingRef.current = false;
@@ -256,7 +261,9 @@ export default function CenterEditor({
             value={editorContent}
             onChange={(val) => {
               if (!isViewingHistory) {
-                setEditorContent(val || '');
+                const nextVal = val || '';
+                setEditorContent(nextVal);
+                if (onContentChange) onContentChange(nextVal);
               }
             }}
             options={{ 
