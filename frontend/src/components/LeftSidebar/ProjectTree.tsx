@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   Folder, FolderOpen, FileCode, Plus, ChevronRight, ChevronDown, 
-  FolderPlus, FilePlus, RefreshCw, Box, Trash2, Eye, EyeOff, AlertTriangle, X,
-  History, Clock
+  FolderPlus, FilePlus, RefreshCw, Trash2, Eye, EyeOff, AlertTriangle, X,
+  History, Clock, Container, Terminal
 } from 'lucide-react';
 import { useToast } from '../Toast';
 
@@ -13,9 +13,10 @@ interface FileNode {
   children: FileNode[];
 }
 
-interface ProjectItem {
+export interface ProjectItem {
   name: string;
   is_hidden: boolean;
+  project_type?: 'static' | 'docker' | 'python';
 }
 
 export interface FileHistoryItem {
@@ -35,6 +36,7 @@ interface Props {
   onCloseFile?: () => void;
   onSelectHistoryItem: (item: FileHistoryItem | null) => void;
   onHistoryCleared: () => void;
+  refreshTrigger?: number;
 }
 
 export default function ProjectTree({ 
@@ -46,7 +48,8 @@ export default function ProjectTree({
   onOpenFile, 
   onCloseFile,
   onSelectHistoryItem,
-  onHistoryCleared
+  onHistoryCleared,
+  refreshTrigger
 }: Props) {
   const { showToast } = useToast();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -60,6 +63,7 @@ export default function ProjectTree({
   
   const [isCreatingProj, setIsCreatingProj] = useState(false);
   const [newProjName, setNewProjName] = useState('');
+  const [newProjType, setNewProjType] = useState<'static' | 'docker' | 'python'>('static');
   
   const [isCreatingItem, setIsCreatingItem] = useState<{ type: 'file' | 'folder' } | null>(null);
   const [newItemName, setNewItemName] = useState('');
@@ -69,37 +73,58 @@ export default function ProjectTree({
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const isDraggingSplit = useRef(false);
 
-  const loadProjects = () => {
+  const loadProjects = useCallback((selectDefault: boolean = false) => {
     fetch('http://localhost:8000/api/projects/')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error("Ошибка загрузки списка проектов");
+        return res.json();
+      })
       .then((data: ProjectItem[]) => {
         setProjects(data);
-        const visibleProjects = data.filter(p => showHidden || !p.is_hidden);
-        if (visibleProjects.length > 0 && (!activeProject || !data.some(p => p.name === activeProject))) {
-          selectProject(visibleProjects[0].name);
-        } else if (data.length === 0) {
-          onSelectProject(null);
+        if (selectDefault) {
+          const visible = data.filter(p => showHidden || !p.is_hidden);
+          if (visible.length > 0 && !activeProject) {
+            selectProject(visible[0].name);
+          }
         }
+      })
+      .catch(err => {
+        showToast(err.message || "Не удалось загрузить проекты", "error");
       });
-  };
+  }, [showHidden, activeProject]);
 
-  const loadProjectTree = (proj: string) => {
-    fetch(`http://localhost:8000/api/projects/${proj}/tree`)
-      .then(res => res.json())
+  const loadProjectTree = useCallback((proj: string) => {
+    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/tree`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Ошибка загрузки файлов для ${proj}`);
+        return res.json();
+      })
       .then((tree: FileNode[]) => {
         setProjectTrees(prev => ({ ...prev, [proj]: tree }));
+      })
+      .catch(err => {
+        showToast(err.message || "Не удалось загрузить дерево файлов", "error");
       });
-  };
+  }, [showToast]);
 
+  // Загрузка при старте и по refreshTrigger
   useEffect(() => {
-    loadProjects();
-  }, [showHidden]);
+    loadProjects(false);
+  }, [showHidden, refreshTrigger, loadProjects]);
+
+  // Реакция на изменение activeProject снаружи (например, при создании из чата)
+  useEffect(() => {
+    if (activeProject) {
+      setExpandedProjects(prev => ({ ...prev, [activeProject]: true }));
+      loadProjectTree(activeProject);
+    }
+  }, [activeProject, loadProjectTree]);
 
   const toggleShowHidden = () => {
     const next = !showHidden;
     setShowHidden(next);
     localStorage.setItem('studio_show_hidden_projects', String(next));
-    showToast(next ? "Showing hidden projects" : "Hidden projects concealed", "info");
+    showToast(next ? "Скрытые проекты отображаются" : "Скрытые проекты скрыты", "info");
   };
 
   const selectProject = (proj: string) => {
@@ -124,11 +149,17 @@ export default function ProjectTree({
 
   const handleToggleHideProject = (proj: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    fetch(`http://localhost:8000/api/projects/${proj}/toggle-visibility`, { method: 'POST' })
-      .then(res => res.json())
+    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/toggle-visibility`, { method: 'POST' })
+      .then(res => {
+        if (!res.ok) throw new Error("Не удалось изменить видимость");
+        return res.json();
+      })
       .then(data => {
-        loadProjects();
-        showToast(data.is_hidden ? `Project "${proj}" hidden` : `Project "${proj}" visible`, "info");
+        loadProjects(false);
+        showToast(data.is_hidden ? `Проект "${proj}" скрыт` : `Проект "${proj}" теперь видим`, "info");
+      })
+      .catch(err => {
+        showToast(err.message, "error");
       });
   };
 
@@ -140,16 +171,19 @@ export default function ProjectTree({
       method: 'DELETE'
     }).then(res => {
       if (res.ok) {
-        showToast(`Project "${targetProj}" deleted`, "success");
+        showToast(`Проект "${targetProj}" успешно удален`, "success");
+        if (activeProject === targetProj) {
+          if (onCloseFile) onCloseFile();
+          onSelectProject(null);
+        }
+        loadProjects(false);
       } else {
-        showToast(`Failed to delete "${targetProj}"`, "error");
+        showToast(`Не удалось удалить проект "${targetProj}"`, "error");
       }
       setProjectToDelete(null);
-      if (activeProject === targetProj) {
-        if (onCloseFile) onCloseFile();
-        onSelectProject(null);
-      }
-      loadProjects();
+    }).catch(() => {
+      showToast("Ошибка сети при удалении проекта", "error");
+      setProjectToDelete(null);
     });
   };
 
@@ -160,35 +194,40 @@ export default function ProjectTree({
     }).then(res => {
       if (res.ok) {
         onHistoryCleared();
-        showToast(`History cleared for "${activeFilePath}"`, "success");
+        showToast(`История ревизий для "${activeFilePath}" очищена`, "success");
       } else {
-        showToast("Failed to clear file history", "error");
+        showToast("Не удалось очистить историю версий", "error");
       }
+      setShowClearHistoryConfirm(false);
+    }).catch(() => {
+      showToast("Ошибка сети при очистке истории", "error");
       setShowClearHistoryConfirm(false);
     });
   };
 
   const createProject = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjName.trim()) return;
+    const name = newProjName.trim();
+    if (!name) return;
+
     fetch('http://localhost:8000/api/projects/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newProjName.trim() })
+      body: JSON.stringify({ name, project_type: newProjType })
     })
       .then(res => {
-        if (!res.ok) throw new Error("Project exists or invalid name");
+        if (!res.ok) throw new Error("Проект с таким именем уже существует или имя некорректно");
         return res.json();
       })
       .then(data => {
-        showToast(`Project "${data.name}" created`, "success");
+        showToast(`Проект "${data.name}" (${data.project_type}) успешно создан`, "success");
         setNewProjName('');
         setIsCreatingProj(false);
-        loadProjects();
+        loadProjects(false);
         selectProject(data.name);
       })
       .catch(err => {
-        showToast(err.message || "Could not create project", "error");
+        showToast(err.message || "Ошибка создания проекта", "error");
       });
   };
 
@@ -203,7 +242,7 @@ export default function ProjectTree({
     const itemType = isCreatingItem.type;
     const itemName = newItemName.trim();
 
-    fetch(`http://localhost:8000/api/projects/${activeProject}/create-item`, {
+    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(activeProject)}/create-item`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -212,33 +251,37 @@ export default function ProjectTree({
       })
     }).then(res => {
       if (res.ok) {
-        showToast(`${itemType === 'folder' ? 'Folder' : 'File'} "${itemName}" created`, "success");
+        showToast(`${itemType === 'folder' ? 'Папка' : 'Файл'} "${itemName}" успешно создана`, "success");
+        setNewItemName('');
+        setIsCreatingItem(null);
+        loadProjectTree(activeProject);
       } else {
-        showToast(`Failed to create ${itemType}`, "error");
+        showToast(`Не удалось создать ${itemType === 'folder' ? 'папку' : 'файл'}`, "error");
       }
-      setNewItemName('');
-      setIsCreatingItem(null);
-      loadProjectTree(activeProject);
+    }).catch(() => {
+      showToast("Ошибка сети при создании элемента", "error");
     });
   };
 
   const handleDeleteItem = (proj: string, itemPath: string, isDir: boolean, e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirmed = window.confirm(`Delete ${isDir ? 'folder' : 'file'} "${itemPath}"?`);
+    const confirmed = window.confirm(`Удалить ${isDir ? 'папку' : 'файл'} "${itemPath}"?`);
     if (!confirmed) return;
 
-    fetch(`http://localhost:8000/api/projects/${proj}/item?path=${encodeURIComponent(itemPath)}`, {
+    fetch(`http://localhost:8000/api/projects/${encodeURIComponent(proj)}/item?path=${encodeURIComponent(itemPath)}`, {
       method: 'DELETE'
     }).then(res => {
       if (res.ok) {
-        showToast(`${isDir ? 'Folder' : 'File'} "${itemPath}" deleted`, "success");
+        showToast(`${isDir ? 'Папка' : 'Файл'} "${itemPath}" удален`, "success");
+        if (activeFilePath === itemPath && onCloseFile) {
+          onCloseFile();
+        }
+        loadProjectTree(proj);
       } else {
-        showToast(`Failed to delete "${itemPath}"`, "error");
+        showToast(`Не удалось удалить "${itemPath}"`, "error");
       }
-      if (activeFilePath === itemPath && onCloseFile) {
-        onCloseFile();
-      }
-      loadProjectTree(proj);
+    }).catch(() => {
+      showToast("Ошибка сети при удалении", "error");
     });
   };
 
@@ -264,6 +307,16 @@ export default function ProjectTree({
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   }, []);
+
+  const renderProjectIcon = (type?: string) => {
+    if (type === 'docker') {
+      return <Container size={15} color="#0db7ed" title="Docker Project" />;
+    }
+    if (type === 'python') {
+      return <Terminal size={15} color="#eab308" title="Python Project" />;
+    }
+    return <Folder size={14} color="#3574f0" title="Static Web Project" />;
+  };
 
   const renderNodes = (proj: string, nodes: FileNode[]) => (
     <ul style={{ listStyle: 'none', paddingLeft: '14px', margin: 0 }}>
@@ -294,7 +347,7 @@ export default function ProjectTree({
                   </div>
                   <button
                     onClick={(e) => handleDeleteItem(proj, node.path, true, e)}
-                    title="Delete folder"
+                    title="Удалить папку"
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                   >
                     <Trash2 size={12} color="#ef4444" />
@@ -325,7 +378,7 @@ export default function ProjectTree({
                 </div>
                 <button
                   onClick={(e) => handleDeleteItem(proj, node.path, false, e)}
-                  title="Delete file"
+                  title="Удалить файл"
                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                 >
                   <Trash2 size={12} color="#ef4444" />
@@ -342,7 +395,6 @@ export default function ProjectTree({
 
   return (
     <div id="left-panel-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)', overflow: 'hidden' }}>
-      {/* 1. Projects Tree */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 120, overflow: 'hidden' }}>
         <div style={{ 
           padding: '8px 12px', 
@@ -359,7 +411,7 @@ export default function ProjectTree({
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button 
               onClick={toggleShowHidden}
-              title={showHidden ? "Hide hidden projects" : "Show hidden projects"}
+              title={showHidden ? "Скрыть скрытые проекты" : "Показать скрытые проекты"}
               className="theme-toggle-btn"
               style={{ 
                 padding: '3px 6px',
@@ -372,15 +424,15 @@ export default function ProjectTree({
 
             <button 
               onClick={() => setIsCreatingProj(prev => !prev)}
-              title="Create new project"
+              title="Создать проект"
               className="theme-toggle-btn"
               style={{ padding: '3px 6px' }}
             >
               <Plus size={13} color="#3574f0" />
             </button>
             <button 
-              onClick={loadProjects}
-              title="Refresh projects"
+              onClick={() => loadProjects(false)}
+              title="Обновить список"
               className="theme-toggle-btn"
               style={{ padding: '3px 6px' }}
             >
@@ -397,42 +449,92 @@ export default function ProjectTree({
               borderBottom: '1px solid var(--border-color)', 
               background: 'var(--input-bg)', 
               display: 'flex', 
-              gap: '6px',
-              alignItems: 'center'
+              flexDirection: 'column',
+              gap: '6px'
             }}
           >
-            <input 
-              autoFocus
-              value={newProjName}
-              onChange={e => setNewProjName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') cancelCreateProject(); }}
-              placeholder="Project name..."
-              className="studio-input"
-              style={{ flex: 1, padding: '4px 6px', fontSize: '11.5px' }}
-            />
-            <button type="submit" className="btn-primary" style={{ padding: '4px 8px' }}>Add</button>
-            <button 
-              type="button" 
-              onClick={cancelCreateProject}
-              className="theme-toggle-btn" 
-              style={{ padding: '4px 6px' }}
-              title="Cancel (Esc)"
-            >
-              <X size={12} />
-            </button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input 
+                autoFocus
+                value={newProjName}
+                onChange={e => setNewProjName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') cancelCreateProject(); }}
+                placeholder="Имя проекта..."
+                className="studio-input"
+                style={{ flex: 1, padding: '4px 6px', fontSize: '11.5px' }}
+              />
+              <button type="submit" className="btn-primary" style={{ padding: '4px 8px' }}>Add</button>
+              <button 
+                type="button" 
+                onClick={cancelCreateProject}
+                className="theme-toggle-btn" 
+                style={{ padding: '4px 6px' }}
+                title="Отмена (Esc)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '4px', fontSize: '10.5px' }}>
+              <button
+                type="button"
+                onClick={() => setNewProjType('static')}
+                style={{
+                  flex: 1,
+                  padding: '3px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-color)',
+                  background: newProjType === 'static' ? '#3574f0' : 'transparent',
+                  color: newProjType === 'static' ? '#fff' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Static
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewProjType('docker')}
+                style={{
+                  flex: 1,
+                  padding: '3px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-color)',
+                  background: newProjType === 'docker' ? '#0db7ed' : 'transparent',
+                  color: newProjType === 'docker' ? '#fff' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Docker
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewProjType('python')}
+                style={{
+                  flex: 1,
+                  padding: '3px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-color)',
+                  background: newProjType === 'python' ? '#eab308' : 'transparent',
+                  color: newProjType === 'python' ? '#000' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Python
+              </button>
+            </div>
           </form>
         )}
 
         {activeProject && (
           <div style={{ padding: '4px 12px', background: 'var(--bg-panel-sub)', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Box size={12} color="#3574f0" />
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              {renderProjectIcon(projects.find(p => p.name === activeProject)?.project_type)}
               <b style={{ color: 'var(--text-main)' }}>{activeProject}</b>
             </span>
             <div style={{ display: 'flex', gap: '4px' }}>
               <button 
                 onClick={() => setIsCreatingItem({ type: 'file' })}
-                title="New File"
+                title="Создать файл"
                 className="theme-toggle-btn"
                 style={{ padding: '2px 5px' }}
               >
@@ -440,7 +542,7 @@ export default function ProjectTree({
               </button>
               <button 
                 onClick={() => setIsCreatingItem({ type: 'folder' })}
-                title="New Folder"
+                title="Создать папку"
                 className="theme-toggle-btn"
                 style={{ padding: '2px 5px' }}
               >
@@ -448,7 +550,7 @@ export default function ProjectTree({
               </button>
               <button 
                 onClick={() => setProjectToDelete(activeProject)}
-                title="Delete this project"
+                title="Удалить проект"
                 className="theme-toggle-btn"
                 style={{ padding: '2px 5px', color: '#ef4444' }}
               >
@@ -465,7 +567,7 @@ export default function ProjectTree({
               value={newItemName}
               onChange={e => setNewItemName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') setIsCreatingItem(null); }}
-              placeholder={isCreatingItem.type === 'file' ? "src/app.py or index.ts..." : "src/components..."}
+              placeholder={isCreatingItem.type === 'file' ? "src/app.py или index.html..." : "src/components..."}
               className="studio-input"
               style={{ flex: 1, padding: '4px 6px', fontSize: '11px' }}
             />
@@ -477,7 +579,7 @@ export default function ProjectTree({
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
           {visibleProjects.length === 0 ? (
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px' }}>
-              {projects.length > 0 ? 'All projects are hidden. Click the eye icon above.' : 'No projects found. Click "+" to create one.'}
+              {projects.length > 0 ? 'Все проекты скрыты. Нажмите на иконку глаза выше.' : 'Нет проектов. Нажмите «+» или напишите в чат.'}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -506,7 +608,7 @@ export default function ProjectTree({
                         <span onClick={(e) => toggleProject(proj, e)} style={{ display: 'flex', alignItems: 'center' }}>
                           {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                         </span>
-                        {isExpanded ? <FolderOpen size={14} color="#3574f0" /> : <Folder size={14} color="#3574f0" />}
+                        {renderProjectIcon(p.project_type)}
                         <span style={{ fontSize: '12px', fontWeight: isSelected ? 600 : 500, color: 'var(--text-main)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                           {proj}
                         </span>
@@ -515,7 +617,7 @@ export default function ProjectTree({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                         <button
                           onClick={(e) => handleToggleHideProject(proj, e)}
-                          title={p.is_hidden ? "Unhide project" : "Hide project"}
+                          title={p.is_hidden ? "Показать проект" : "Скрыть проект"}
                           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 4px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}
                         >
                           {p.is_hidden ? <EyeOff size={13} color="#f59e0b" /> : <Eye size={13} />}
@@ -526,7 +628,7 @@ export default function ProjectTree({
                             e.stopPropagation();
                             setProjectToDelete(proj);
                           }}
-                          title="Delete project"
+                          title="Удалить проект"
                           style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '3px 4px', display: 'flex', alignItems: 'center' }}
                         >
                           <Trash2 size={13} color="#ef4444" />
@@ -537,8 +639,8 @@ export default function ProjectTree({
                     {isExpanded && (
                       <div style={{ marginTop: '2px' }}>
                         {tree.length === 0 ? (
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', paddingLeft: '28px', paddingY: '3px' }}>
-                            (Empty workspace)
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', paddingLeft: '28px', padding: '4px 0' }}>
+                            (Пустой проект)
                           </div>
                         ) : (
                           renderNodes(proj, tree)
@@ -553,14 +655,12 @@ export default function ProjectTree({
         </div>
       </div>
 
-      {/* 2. Resizer */}
       <div 
         className="resize-gutter-horizontal" 
         onMouseDown={startDragSplit}
-        title="Drag up/down to resize File History"
+        title="Перетащите вверх/вниз для изменения высоты истории"
       />
 
-      {/* 3. File History List with Clear All History Trash Button */}
       <div style={{ height: `${historyHeight}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-card-sub)', overflow: 'hidden' }}>
         <div style={{ 
           padding: '6px 12px', 
@@ -586,7 +686,7 @@ export default function ProjectTree({
             {fileHistory.length > 0 && (
               <button
                 onClick={() => setShowClearHistoryConfirm(true)}
-                title="Clear revision history for this file"
+                title="Очистить историю версий этого файла"
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -606,11 +706,11 @@ export default function ProjectTree({
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {!activeFilePath ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px', marginTop: '24px' }}>
-              Select a file to inspect revision history.
+              Выберите файл для просмотра ревизий.
             </div>
           ) : fileHistory.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px', marginTop: '24px' }}>
-              No revisions recorded yet. Save file to record snapshots.
+              История пуста. Сохраните файл для записи ревизии.
             </div>
           ) : (
             fileHistory.map((item, idx) => {
@@ -639,7 +739,7 @@ export default function ProjectTree({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
                     <Clock size={12} color={isSelected ? '#3574f0' : 'var(--text-muted)'} />
                     <span style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
-                      {item.timestamp || item.created_at?.substring(0, 19).replace('T', ' ') || 'Saved snapshot'}
+                      {item.timestamp || item.created_at?.substring(0, 19).replace('T', ' ') || 'Snapshot'}
                     </span>
                   </div>
                   {idx === 0 && (
@@ -654,7 +754,6 @@ export default function ProjectTree({
         </div>
       </div>
 
-      {/* Confirmation Modal: Delete Project */}
       {projectToDelete && (
         <div style={{
           position: 'fixed',
@@ -686,16 +785,16 @@ export default function ProjectTree({
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Delete Project
+                  Удаление проекта
                 </h3>
                 <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Are you sure you want to delete <b style={{ color: 'var(--text-main)' }}>{projectToDelete}</b>?
+                  Вы действительно хотите удалить <b style={{ color: 'var(--text-main)' }}>{projectToDelete}</b>?
                 </p>
               </div>
             </div>
 
             <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-              This will permanently remove the directory, all contained files and their history. This action cannot be undone.
+              Это действие необратимо удалит папку проекта на диске, все файлы и их историю версий.
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
@@ -704,7 +803,7 @@ export default function ProjectTree({
                 className="theme-toggle-btn"
                 style={{ padding: '6px 12px', fontSize: '12px' }}
               >
-                Cancel
+                Отмена
               </button>
               <button
                 onClick={confirmDeleteProject}
@@ -719,14 +818,13 @@ export default function ProjectTree({
                   cursor: 'pointer'
                 }}
               >
-                Delete Project
+                Удалить проект
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Confirmation Modal: Clear File History */}
       {showClearHistoryConfirm && (
         <div style={{
           position: 'fixed',
@@ -758,16 +856,16 @@ export default function ProjectTree({
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Clear File History
+                  Очистка истории версий
                 </h3>
                 <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Clear all saved snapshots for <b style={{ color: 'var(--text-main)' }}>{activeFilePath}</b>?
+                  Очистить все снимки для <b style={{ color: 'var(--text-main)' }}>{activeFilePath}</b>?
                 </p>
               </div>
             </div>
 
             <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-              All historical revisions for this file will be permanently deleted from the database.
+              Все записанные версии этого файла будут безвозвратно удалены из базы данных.
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
@@ -776,7 +874,7 @@ export default function ProjectTree({
                 className="theme-toggle-btn"
                 style={{ padding: '6px 12px', fontSize: '12px' }}
               >
-                Cancel
+                Отмена
               </button>
               <button
                 onClick={confirmClearFileHistory}
@@ -791,7 +889,7 @@ export default function ProjectTree({
                   cursor: 'pointer'
                 }}
               >
-                Clear History
+                Очистить
               </button>
             </div>
           </div>

@@ -1,14 +1,17 @@
 import os
+import re
 import json
 import httpx
 import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 from sse_starlette.sse import EventSourceResponse
 import database
+from .projects import init_project_structure
 
 router = APIRouter()
+WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/workspace")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 
 TRANSLATOR_MODEL = "dolphin-llama3:latest"
@@ -25,6 +28,41 @@ class ChatPayload(BaseModel):
     model: Optional[str] = None
     messages: List[ChatMessage]
     stream: Optional[bool] = True
+
+def parse_project_creation_intent(text: str):
+    raw = text.strip()
+    lower = raw.lower()
+
+    # 1. Проверяем, есть ли запрос на создание
+    trigger_words = ["создай", "создать", "сделай", "новый проект", "create", "new"]
+    if not any(w in lower for w in trigger_words):
+        return None
+
+    # 2. Определяем тип проекта по контексту
+    ptype = "static"
+    if any(k in lower for k in ["докер", "docker"]):
+        ptype = "docker"
+    elif any(k in lower for k in ["пайтон", "python", "питон"]):
+        ptype = "python"
+    elif any(k in lower for k in ["статич", "static", "лендинг", "landing", "веб", "web"]):
+        ptype = "static"
+
+    # 3. Извлекаем название проекта (строго после слова "проект" или "project")
+    # Поддерживаем буквы, цифры, дефис '-' и лоу дэш '_'
+    match = re.search(r"(?:проект|project)\s+([a-zA-Z0-9_\-]+)", raw, re.IGNORECASE)
+    if match:
+        proj_name = match.group(1).strip()
+        return {"name": proj_name, "project_type": ptype}
+
+    # Если слово "проект" пропущено, берем последнее валидное имя
+    fallback_match = re.search(r"(?:создай|создать|сделай|create|new)\s+(?:статичный|статический|докер|docker|пайтон|python|питон|лендинг|landing)?\s*([a-zA-Z0-9_\-]+)", raw, re.IGNORECASE)
+    if fallback_match:
+        candidate = fallback_match.group(1).strip()
+        stop_words = {"статичный", "статический", "докер", "docker", "пайтон", "python", "питон", "проект", "project", "landing", "лендинг"}
+        if candidate.lower() not in stop_words:
+            return {"name": candidate, "project_type": ptype}
+
+    return None
 
 async def translate_text_to_english(text: str, client: httpx.AsyncClient) -> str:
     if not text.strip():
@@ -67,12 +105,15 @@ async def analyze_vision_to_english(text: str, images: List[str], client: httpx.
 
 @router.get("/history")
 async def get_global_history():
+    if database.db is None:
+        return []
     thread = await database.db.chat_threads.find_one({"thread_id": "global_chat"})
     return thread.get("messages", []) if thread else []
 
 @router.delete("/history")
 async def clear_global_history():
-    await database.db.chat_threads.delete_one({"thread_id": "global_chat"})
+    if database.db is not None:
+        await database.db.chat_threads.delete_one({"thread_id": "global_chat"})
     return {"status": "cleared"}
 
 @router.post("/completions")
@@ -80,6 +121,53 @@ async def chat_stream(payload: ChatPayload):
     target_model = payload.model or DEFAULT_CODER_MODEL
     has_images = any(m.images and len(m.images) > 0 for m in payload.messages)
     last_user_msg = payload.messages[-1]
+
+    project_intent = parse_project_creation_intent(last_user_msg.content)
+
+    if project_intent:
+        proj_name = project_intent["name"]
+        proj_type = project_intent["project_type"]
+        proj_path = os.path.join(WORKSPACE_DIR, proj_name)
+
+        if not os.path.exists(proj_path):
+            init_project_structure(proj_path, proj_name, proj_type)
+
+        if database.db is not None:
+            await database.db.project_settings.update_one(
+                {"project_name": proj_name},
+                {"$set": {
+                    "project_name": proj_name,
+                    "project_type": proj_type,
+                    "is_hidden": False,
+                    "created_at": datetime.datetime.utcnow().isoformat()
+                }},
+                upsert=True
+            )
+
+            now_iso = datetime.datetime.utcnow().isoformat()
+            agent_init_reply = f"Проект `{proj_name}` ({proj_type}) успешно создан. Контекст загружен."
+            await database.db.agent_sessions.update_one(
+                {"project_name": proj_name},
+                {"$push": {"messages": {
+                    "$each": [
+                        {"role": "user", "content": last_user_msg.content, "created_at": now_iso},
+                        {"role": "assistant", "content": agent_init_reply, "modelUsed": target_model, "created_at": now_iso}
+                    ]
+                }}, "$set": {"updated_at": now_iso}},
+                upsert=True
+            )
+
+        default_file = "index.html" if proj_type == "static" else ("docker-compose.yml" if proj_type == "docker" else "main.py")
+
+        async def create_event():
+            yield {"data": json.dumps({"type": "meta", "model": target_model})}
+            yield {"data": json.dumps({
+                "type": "project_created",
+                "project_name": proj_name,
+                "project_type": proj_type,
+                "default_file": default_file
+            })}
+        return EventSourceResponse(create_event())
 
     cursor = database.db.system_prompts.find({"is_active": True})
     active_rules = []
@@ -92,12 +180,7 @@ async def chat_stream(payload: ChatPayload):
     now_iso = datetime.datetime.utcnow().isoformat()
     await database.db.chat_threads.update_one(
         {"thread_id": "global_chat"},
-        {"$push": {"messages": {
-            "role": "user",
-            "content": last_user_msg.content,
-            "images": last_user_msg.images,
-            "created_at": now_iso
-        }}, "$set": {"updated_at": now_iso}},
+        {"$push": {"messages": {             "role": "user",             "content": last_user_msg.content,             "images": last_user_msg.images,             "created_at": now_iso         }}, "$set": {"updated_at": now_iso}},
         upsert=True
     )
 
@@ -105,7 +188,6 @@ async def chat_stream(payload: ChatPayload):
         yield {"data": json.dumps({"type": "meta", "model": target_model})}
 
         async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
-            # Пре-перевод под капотом
             if has_images and last_user_msg.images:
                 english_user_prompt = await analyze_vision_to_english(last_user_msg.content, last_user_msg.images, client)
             else:

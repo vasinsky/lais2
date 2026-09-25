@@ -3,8 +3,7 @@ import shutil
 import datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import List
-from bson import ObjectId
+from typing import List, Optional
 import database
 
 router = APIRouter()
@@ -12,6 +11,7 @@ WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/workspace")
 
 class ProjectCreate(BaseModel):
     name: str
+    project_type: Optional[str] = "static"
 
 class FileWrite(BaseModel):
     path: str
@@ -28,17 +28,218 @@ def get_file_header_comment(filename: str) -> str:
     tag = "created from local ai studio"
     ext = os.path.splitext(filename)[1].lower()
     
-    if ext in ['.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.cs', '.go', '.rs', '.php', '.swift', '.kt', '.scala', '.dart']:
+    if ext in ['.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.cs', '.go', '.rs', '.php']:
         return f"// {tag}\n\n"
-    elif ext in ['.py', '.sh', '.bash', '.zsh', '.rb', '.pl', '.yaml', '.yml', '.toml', '.r', '.dockerfile', '.env'] or filename.lower() in ['dockerfile', 'makefile']:
+    elif ext in ['.py', '.sh', '.bash', '.yaml', '.yml', '.toml', '.dockerfile', '.env'] or filename.lower() in ['dockerfile', 'makefile']:
         return f"# {tag}\n\n"
-    elif ext in ['.html', '.htm', '.xml', '.svg', '.vue']:
+    elif ext in ['.html', '.htm', '.xml', '.svg']:
         return f"<!-- {tag} -->\n\n"
-    elif ext in ['.css', '.scss', '.sass', '.less']:
+    elif ext in ['.css', '.scss']:
         return f"/* {tag} */\n\n"
-    elif ext in ['.sql', '.lua', '.hs']:
-        return f"-- {tag}\n\n"
     return f"# {tag}\n\n"
+
+def detect_project_type(proj_path: str, stored_type: Optional[str] = None) -> str:
+    if stored_type in ["static", "docker", "python"]:
+        return stored_type
+    files = os.listdir(proj_path) if os.path.exists(proj_path) else []
+    if any(f in files for f in ["docker-compose.yml", "docker-compose.yaml", "Dockerfile"]):
+        return "docker"
+    if any(f in files for f in ["main.py", "requirements.txt", "Pipfile", "pyproject.toml"]):
+        return "python"
+    return "static"
+
+def init_project_structure(proj_path: str, proj_name: str, ptype: str):
+    os.makedirs(proj_path, exist_ok=True)
+    
+    if ptype == "static":
+        html_lines = [
+            "<!-- created from local ai studio -->",
+            "<!DOCTYPE html>",
+            '<html lang="ru">',
+            "<head>",
+            '  <meta charset="UTF-8">',
+            '  <meta name="viewport" content="width=device-width, initial-scale=1.0">',
+            f"  <title>{proj_name}</title>",
+            '  <link rel="stylesheet" href="style.css">',
+            "</head>",
+            "<body>",
+            '  <main class="container">',
+            f"    <h1>Добро пожаловать в {proj_name}</h1>",
+            "    <p>Статичный веб-проект успешно инициализирован.</p>",
+            "  </main>",
+            '  <script src="script.js"></script>',
+            "</body>",
+            "</html>\n"
+        ]
+        css_lines = [
+            "/* created from local ai studio */",
+            "* {",
+            "  margin: 0;",
+            "  padding: 0;",
+            "  box-sizing: border-box;",
+            "}",
+            "",
+            "body {",
+            "  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;",
+            "  background-color: #0f172a;",
+            "  color: #f8fafc;",
+            "  display: flex;",
+            "  align-items: center;",
+            "  justify-content: center;",
+            "  min-height: 100vh;",
+            "}",
+            "",
+            ".container {",
+            "  text-align: center;",
+            "  padding: 2.5rem;",
+            "  background: #1e293b;",
+            "  border-radius: 12px;",
+            "  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);",
+            "}",
+            "",
+            "h1 {",
+            "  font-size: 2rem;",
+            "  margin-bottom: 0.75rem;",
+            "  color: #38bdf8;",
+            "}",
+            "",
+            "p {",
+            "  color: #94a3b8;",
+            "}\n"
+        ]
+        js_lines = [
+            "// created from local ai studio",
+            "document.addEventListener('DOMContentLoaded', () => {",
+            "  console.log('Project initialized successfully.');",
+            "});\n"
+        ]
+        with open(os.path.join(proj_path, "index.html"), "w", encoding="utf-8") as f:
+            f.write("\n".join(html_lines))
+        with open(os.path.join(proj_path, "style.css"), "w", encoding="utf-8") as f:
+            f.write("\n".join(css_lines))
+        with open(os.path.join(proj_path, "script.js"), "w", encoding="utf-8") as f:
+            f.write("\n".join(js_lines))
+
+    elif ptype == "docker":
+        compose_lines = [
+            "# created from local ai studio",
+            "version: '3.8'",
+            "",
+            "services:",
+            "  web:",
+            "    image: nginx:alpine",
+            f"    container_name: {proj_name}_nginx",
+            "    ports:",
+            '      - "8080:80"',
+            "    volumes:",
+            "      - ./html:/usr/share/nginx/html:ro",
+            "      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+            "    restart: unless-stopped\n"
+        ]
+        nginx_lines = [
+            "# created from local ai studio",
+            "server {",
+            "    listen 80;",
+            "    server_name localhost;",
+            "",
+            "    location / {",
+            "        root /usr/share/nginx/html;",
+            "        index index.html;",
+            "        try_files $uri $uri/ /index.html;",
+            "    }",
+            "}\n"
+        ]
+        docker_html_lines = [
+            "<!-- created from local ai studio -->",
+            "<!DOCTYPE html>",
+            '<html lang="ru">',
+            "<head>",
+            '  <meta charset="UTF-8">',
+            f"  <title>{proj_name} - Nginx Docker</title>",
+            "  <style>",
+            "    body {",
+            "      background: #0b1120;",
+            "      color: #38bdf8;",
+            "      font-family: sans-serif;",
+            "      display: flex;",
+            "      height: 100vh;",
+            "      align-items: center;",
+            "      justify-content: center;",
+            "      margin: 0;",
+            "    }",
+            "    .box {",
+            "      text-align: center;",
+            "      padding: 40px;",
+            "      border: 1px solid #1e293b;",
+            "      border-radius: 12px;",
+            "      background: #0f172a;",
+            "    }",
+            "  </style>",
+            "</head>",
+            "<body>",
+            '  <div class="box">',
+            "    <h1>Docker + Nginx</h1>",
+            f"    <p style=\"color: #94a3b8;\">Проект {proj_name} готов к запуску через docker-compose.</p>",
+            "  </div>",
+            "</body>",
+            "</html>\n"
+        ]
+        os.makedirs(os.path.join(proj_path, "html"), exist_ok=True)
+        with open(os.path.join(proj_path, "docker-compose.yml"), "w", encoding="utf-8") as f:
+            f.write("\n".join(compose_lines))
+        with open(os.path.join(proj_path, "nginx.conf"), "w", encoding="utf-8") as f:
+            f.write("\n".join(nginx_lines))
+        with open(os.path.join(proj_path, "html", "index.html"), "w", encoding="utf-8") as f:
+            f.write("\n".join(docker_html_lines))
+
+    elif ptype == "python":
+        main_lines = [
+            "# created from local ai studio",
+            "import sys",
+            "",
+            "def main():",
+            f"    print(\"Project '{proj_name}' started successfully.\")",
+            "",
+            "if __name__ == '__main__':",
+            "    main()\n"
+        ]
+        req_lines = [
+            "# created from local ai studio",
+            "requests>=2.31.0",
+            "python-dotenv>=1.0.0\n"
+        ]
+        ignore_lines = [
+            "# created from local ai studio",
+            "__pycache__/",
+            "*.py[cod]",
+            "*$py.class",
+            ".venv/",
+            "venv/",
+            "ENV/",
+            ".env\n"
+        ]
+        readme_lines = [
+            "# created from local ai studio",
+            f"# {proj_name}",
+            "",
+            "Python project created in Local AI Studio.",
+            "",
+            "## Quick Start",
+            "```bash",
+            "python3 -m venv .venv",
+            "source .venv/bin/activate",
+            "pip install -r requirements.txt",
+            "python main.py",
+            "```\n"
+        ]
+        with open(os.path.join(proj_path, "main.py"), "w", encoding="utf-8") as f:
+            f.write("\n".join(main_lines))
+        with open(os.path.join(proj_path, "requirements.txt"), "w", encoding="utf-8") as f:
+            f.write("\n".join(req_lines))
+        with open(os.path.join(proj_path, ".gitignore"), "w", encoding="utf-8") as f:
+            f.write("\n".join(ignore_lines))
+        with open(os.path.join(proj_path, "README.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(readme_lines))
 
 @router.get("/")
 async def list_projects():
@@ -46,25 +247,40 @@ async def list_projects():
         os.makedirs(WORKSPACE_DIR, exist_ok=True)
     all_dirs = sorted([d for d in os.listdir(WORKSPACE_DIR) if os.path.isdir(os.path.join(WORKSPACE_DIR, d)) and not d.startswith('.')])
     
-    hidden_docs = await database.db.project_settings.find({"is_hidden": True}).to_list(length=1000)
-    hidden_set = {doc["project_name"] for doc in hidden_docs}
+    settings_docs = await database.db.project_settings.find().to_list(length=1000)
+    settings_map = {doc["project_name"]: doc for doc in settings_docs}
     
-    return [{"name": d, "is_hidden": d in hidden_set} for d in all_dirs]
+    result = []
+    for d in all_dirs:
+        proj_dir = os.path.join(WORKSPACE_DIR, d)
+        s = settings_map.get(d, {})
+        ptype = detect_project_type(proj_dir, s.get("project_type"))
+        result.append({
+            "name": d, 
+            "is_hidden": s.get("is_hidden", False),
+            "project_type": ptype
+        })
+    return result
 
 @router.post("/")
-def create_project(data: ProjectCreate):
+async def create_project(data: ProjectCreate):
     cleaned_name = data.name.strip().replace("/", "_").replace("\\", "_")
     if not cleaned_name:
         raise HTTPException(status_code=400, detail="Invalid project name")
     proj_path = os.path.join(WORKSPACE_DIR, cleaned_name)
     if os.path.exists(proj_path):
         raise HTTPException(status_code=400, detail="Project already exists")
-    os.makedirs(proj_path, exist_ok=True)
     
-    header = get_file_header_comment("README.md")
-    with open(os.path.join(proj_path, "README.md"), "w", encoding="utf-8") as f:
-        f.write(f"{header}# {cleaned_name}\n\nProject initialized in Local AI Studio.\n")
-    return {"status": "created", "name": cleaned_name}
+    ptype = data.project_type if data.project_type in ["static", "docker", "python"] else "static"
+    init_project_structure(proj_path, cleaned_name, ptype)
+
+    await database.db.project_settings.update_one(
+        {"project_name": cleaned_name},
+        {"$set": {"project_name": cleaned_name, "project_type": ptype, "is_hidden": False, "created_at": datetime.datetime.utcnow().isoformat()}},
+        upsert=True
+    )
+
+    return {"status": "created", "name": cleaned_name, "project_type": ptype}
 
 @router.delete("/{project_name}")
 async def delete_project(project_name: str):
@@ -80,6 +296,7 @@ async def delete_project(project_name: str):
     shutil.rmtree(proj_path)
     await database.db.project_settings.delete_many({"project_name": project_name})
     await database.db.file_history.delete_many({"project_name": project_name})
+    await database.db.agent_sessions.delete_many({"project_name": project_name})
     return {"status": "deleted", "name": project_name}
 
 @router.post("/{project_name}/toggle-visibility")

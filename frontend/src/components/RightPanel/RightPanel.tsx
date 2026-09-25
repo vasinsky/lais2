@@ -1,18 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  MessageSquare, Bot, Send, Paperclip, X, Square, Loader2, 
-  Sparkles, Copy, Check, Trash2, AlertTriangle, FileCode2
+  Send, Sparkles, MessageSquare, Terminal, Trash2, Paperclip, X,
+  CheckCircle, ArrowRight
 } from 'lucide-react';
 import { useToast } from '../Toast';
 import { FileHistoryItem } from '../LeftSidebar/ProjectTree';
 
 interface ChatMessage {
-  role: string;
+  role: 'user' | 'assistant' | 'system';
   content: string;
   images?: string[];
   modelUsed?: string;
-  isStreamingToFile?: boolean;
-  targetFile?: string;
+  created_at?: string;
 }
 
 interface Props {
@@ -23,63 +22,39 @@ interface Props {
   activeFileContent?: string;
   selectedOllama: string;
   selectedComfy: string;
-  onLiveStreamToEditor: (targetPath: string, codeChunk: string, isStart: boolean) => void;
-  onFileAutoSaved: (targetPath: string, rev: FileHistoryItem) => void;
+  onLiveStreamToEditor: (targetPath: string, chunk: string, isStart: boolean) => void;
+  onProjectCreatedFromChat: (projName: string, defaultFile?: string) => void;
+  onFileAutoSaved: (filePath: string, revision: FileHistoryItem) => void;
 }
 
-export default function RightPanel({ 
+export default function RightPanel({
   mode,
   onModeChange,
-  activeProject, 
+  activeProject,
   activeFilePath,
   activeFileContent,
   selectedOllama,
   onLiveStreamToEditor,
+  onProjectCreatedFromChat,
   onFileAutoSaved
 }: Props) {
   const { showToast } = useToast();
+  const [inputVal, setInputVal] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  
-  // Ключ черновика в localStorage зависит от режима и активного проекта
-  const getDraftKey = (targetMode: 'chat' | 'agent', proj: string | null) => {
-    return targetMode === 'chat' ? 'studio_draft_chat' : `studio_draft_agent_${proj || 'none'}`;
-  };
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeModelUsed, setActiveModelUsed] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [input, setInput] = useState<string>(() => {
-    return localStorage.getItem(getDraftKey(mode, activeProject)) || '';
-  });
-  
-  const [attachedImage, setAttachedImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [activeModelInfo, setActiveModelInfo] = useState<string | null>(null);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-
-  // Храним последнее отправленное сообщение для восстановления при Stop
-  const lastSubmittedPromptRef = useRef<string>('');
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  // Автоскролл
-  useEffect(() => {
+  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
-
-  // Восстановление черновика при смене режима или активного проекта
-  useEffect(() => {
-    const savedDraft = localStorage.getItem(getDraftKey(mode, activeProject)) || '';
-    setInput(savedDraft);
-  }, [mode, activeProject]);
-
-  // Сохранение черновика при каждом вводе
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setInput(val);
-    localStorage.setItem(getDraftKey(mode, activeProject), val);
   };
 
-  // Загрузка истории
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
   const loadHistory = () => {
     if (mode === 'chat') {
       fetch('http://localhost:8000/api/chat/history')
@@ -102,518 +77,482 @@ export default function RightPanel({
     loadHistory();
   }, [mode, activeProject]);
 
-  const confirmClearHistory = () => {
-    setShowClearConfirm(false);
+  const handleClearHistory = () => {
     if (mode === 'chat') {
       fetch('http://localhost:8000/api/chat/history', { method: 'DELETE' })
-        .then(() => {
-          setMessages([]);
-          showToast("Global chat history cleared", "success");
+        .then(res => {
+          if (res.ok) {
+            setMessages([]);
+            showToast("История Global Chat очищена", "info");
+          }
         });
-    } else {
-      if (!activeProject) return;
+    } else if (activeProject) {
       fetch(`http://localhost:8000/api/agent/${encodeURIComponent(activeProject)}/history`, { method: 'DELETE' })
-        .then(() => {
-          setMessages([]);
-          showToast(`Agent history cleared for "${activeProject}"`, "success");
+        .then(res => {
+          if (res.ok) {
+            setMessages([]);
+            showToast(`История агента "${activeProject}" очищена`, "info");
+          }
         });
     }
   };
 
-  const handleCopyMessage = (text: string, index: number) => {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const base64 = (ev.target?.result as string)?.split(',')[1];
+        if (base64) {
+          setSelectedImages(prev => [...prev, base64]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const prompt = inputVal.trim();
+    if (!prompt || isLoading) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      setAttachedImage(result.split(',')[1]);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
-
-  // Остановка генерации: возвращаем отправленное сообщение обратно в поле ввода
-  const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+    if (mode === 'agent' && !activeProject) {
+      showToast("Сначала выберите или создайте проект слева", "error");
+      return;
     }
-    setLoading(false);
-    setActiveModelInfo(null);
 
-    // Восстанавливаем отправленный текст обратно в инпут и черновик
-    if (lastSubmittedPromptRef.current) {
-      setInput(lastSubmittedPromptRef.current);
-      localStorage.setItem(getDraftKey(mode, activeProject), lastSubmittedPromptRef.current);
-    }
-  };
-
-  const sendMessage = async () => {
-    if ((!input.trim() && !attachedImage) || loading) return;
-
-    const submittedText = input.trim();
-    lastSubmittedPromptRef.current = submittedText;
-
+    const currentImages = [...selectedImages];
     const userMsg: ChatMessage = {
       role: 'user',
-      content: submittedText,
-      images: attachedImage ? [attachedImage] : undefined
+      content: prompt,
+      images: currentImages.length > 0 ? currentImages : undefined
     };
 
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    setMessages(prev => [...prev, userMsg]);
+    setInputVal('');
+    setSelectedImages([]);
+    setIsLoading(true);
+    setActiveModelUsed(null);
 
-    // Очищаем инпут и сохранённый черновик текущей вкладки
-    setInput('');
-    localStorage.removeItem(getDraftKey(mode, activeProject));
-    setAttachedImage(null);
-    setLoading(true);
+    if (mode === 'chat') {
+      try {
+        const res = await fetch('http://localhost:8000/api/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: selectedOllama,
+            messages: [...messages, userMsg],
+            stream: true
+          })
+        });
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+        if (!res.ok) throw new Error("Сетевая ошибка при обращении к серверу");
 
-    const endpoint = mode === 'chat' 
-      ? 'http://localhost:8000/api/chat/completions'
-      : 'http://localhost:8000/api/agent/execute';
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let assistantReply = '';
+        let isStarted = false;
 
-    const payload = mode === 'chat'
-      ? { 
-          model: selectedOllama, 
-          messages: nextMessages.map(m => ({ role: m.role, content: m.content, images: m.images }))
-        }
-      : { 
-          project_name: activeProject, 
-          prompt: userMsg.content, 
-          model: selectedOllama,
-          active_file_path: activeFilePath,
-          active_file_content: activeFileContent
-        };
-
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
-    setMessages(prev => [...prev, assistantMsg]);
-
-    let streamingToFile = false;
-    let targetFilePath = '';
-    let isFirstChunk = true;
-
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (reader) {
-        while (true) {
-          const { value, done } = await reader.read();
+        while (reader) {
+          const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+
+          const rawText = decoder.decode(value, { stream: true });
+          const lines = rawText.split('\n');
+
           for (const line of lines) {
-            if (line.startsWith('data:')) {
+            if (line.startsWith('data: ')) {
               try {
-                const data = JSON.parse(line.replace('data:', '').trim());
+                const data = JSON.parse(line.substring(6));
+
                 if (data.type === 'meta') {
-                  setActiveModelInfo(data.model);
-                  assistantMsg.modelUsed = data.model;
-                  continue;
-                }
-
-                if (data.type === 'stream_target') {
-                  streamingToFile = true;
-                  targetFilePath = data.file_path;
-                  assistantMsg.isStreamingToFile = true;
-                  assistantMsg.targetFile = targetFilePath;
-                  assistantMsg.content = `Writing code directly into \`${targetFilePath}\`...`;
-                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
-                  continue;
-                }
-
-                if (data.type === 'file_saved') {
-                  assistantMsg.content = `Code written and saved to \`${data.file_path}\`.`;
-                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
-                  onFileAutoSaved(data.file_path, data.revision);
-                  continue;
-                }
-
-                const token = data.message?.content || '';
-                if (streamingToFile) {
-                  onLiveStreamToEditor(targetFilePath, token, isFirstChunk);
-                  isFirstChunk = false;
-                } else {
-                  assistantMsg.content += token;
-                  setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
+                  setActiveModelUsed(data.model);
+                } else if (data.type === 'project_created') {
+                  // Вызов создания проекта без прерывания чтения
+                  onProjectCreatedFromChat(data.project_name, data.default_file);
+                } else if (data.message && data.message.content) {
+                  assistantReply += data.message.content;
+                  if (!isStarted) {
+                    setMessages(prev => [...prev, {
+                      role: 'assistant',
+                      content: assistantReply,
+                      modelUsed: selectedOllama
+                    }]);
+                    isStarted = true;
+                  } else {
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1].content = assistantReply;
+                      return updated;
+                    });
+                  }
                 }
               } catch (_) {}
             }
           }
         }
+      } catch (err: any) {
+        showToast(err.message || "Ошибка отправки сообщения", "error");
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        assistantMsg.content += ' [stopped by user]';
-        setMessages(prev => [...prev.slice(0, -1), { ...assistantMsg }]);
+    } else {
+      // Режим Project Agent
+      try {
+        const res = await fetch('http://localhost:8000/api/agent/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_name: activeProject,
+            prompt: prompt,
+            model: selectedOllama,
+            images: currentImages.length > 0 ? currentImages : undefined,
+            active_file_path: activeFilePath || undefined,
+            active_file_content: activeFileContent || undefined
+          })
+        });
+
+        if (!res.ok) throw new Error("Сетевая ошибка при исполнении задачи");
+
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let assistantReply = '';
+        let isStarted = false;
+        let isStreamingToFile = false;
+        let currentStreamFile = '';
+
+        while (reader) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const rawText = decoder.decode(value, { stream: true });
+          const lines = rawText.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+
+                if (data.type === 'meta') {
+                  setActiveModelUsed(data.model);
+                } else if (data.type === 'stream_target') {
+                  isStreamingToFile = true;
+                  currentStreamFile = data.file_path;
+                  onLiveStreamToEditor(currentStreamFile, '', true);
+                } else if (data.type === 'file_saved') {
+                  onFileAutoSaved(data.file_path, data.revision);
+                } else if (data.message && data.message.content) {
+                  const token = data.message.content;
+                  assistantReply += token;
+
+                  if (isStreamingToFile) {
+                    onLiveStreamToEditor(currentStreamFile, token, false);
+                  }
+
+                  if (!isStarted) {
+                    setMessages(prev => [...prev, {
+                      role: 'assistant',
+                      content: assistantReply,
+                      modelUsed: selectedOllama
+                    }]);
+                    isStarted = true;
+                  } else {
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1].content = assistantReply;
+                      return updated;
+                    });
+                  }
+                }
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (err: any) {
+        showToast(err.message || "Ошибка исполнения агентом", "error");
+      } finally {
+        setIsLoading(false);
       }
-    } finally {
-      setLoading(false);
-      setActiveModelInfo(null);
-      abortControllerRef.current = null;
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)' }}>
-      {/* Header Tabs */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)', overflow: 'hidden' }}>
+      {/* Переключатель режимов */}
       <div style={{ 
         padding: '8px 12px', 
         borderBottom: '1px solid var(--border-color)', 
         display: 'flex', 
         alignItems: 'center', 
-        justifyContent: 'space-between', 
-        background: 'var(--bg-header)' 
+        justifyContent: 'space-between',
+        background: 'var(--bg-card)'
       }}>
-        <div style={{ 
-          display: 'flex', 
-          background: 'var(--input-bg)', 
-          border: '1px solid var(--input-border)', 
-          padding: '3px', 
-          borderRadius: '7px',
-          gap: '2px'
-        }}>
-          <button 
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button
             onClick={() => onModeChange('chat')}
             style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', fontSize: '12px',
-              fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
-              background: mode === 'chat' ? '#3574f0' : 'transparent',
-              color: mode === 'chat' ? '#ffffff' : 'var(--text-muted)',
-              boxShadow: mode === 'chat' ? '0 1px 4px rgba(53, 116, 240, 0.35)' : 'none',
-              transition: 'all 0.15s ease'
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: mode === 'chat' ? 'var(--hover-item)' : 'transparent',
+              color: mode === 'chat' ? 'var(--btn-primary)' : 'var(--text-muted)',
+              fontSize: '11.5px',
+              fontWeight: mode === 'chat' ? 600 : 500,
+              cursor: 'pointer'
             }}
           >
-            <MessageSquare size={13} color={mode === 'chat' ? '#ffffff' : 'var(--text-muted)'} />
-            <span>Global Chat</span>
+            <MessageSquare size={13} />
+            Global Chat
           </button>
-          
-          <button 
+
+          <button
             onClick={() => onModeChange('agent')}
             style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', fontSize: '12px',
-              fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
-              background: mode === 'agent' ? '#3574f0' : 'transparent',
-              color: mode === 'agent' ? '#ffffff' : 'var(--text-muted)',
-              boxShadow: mode === 'agent' ? '0 1px 4px rgba(53, 116, 240, 0.35)' : 'none',
-              transition: 'all 0.15s ease'
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              border: 'none',
+              background: mode === 'agent' ? 'var(--hover-item)' : 'transparent',
+              color: mode === 'agent' ? 'var(--btn-primary)' : 'var(--text-muted)',
+              fontSize: '11.5px',
+              fontWeight: mode === 'agent' ? 600 : 500,
+              cursor: 'pointer'
             }}
           >
-            <Bot size={13} color={mode === 'agent' ? '#ffffff' : 'var(--text-muted)'} />
-            <span>Project Agent</span>
+            <Sparkles size={13} />
+            Project Agent
           </button>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {mode === 'agent' ? (activeProject ? `📂 ${activeProject}` : '⚠️ No Project') : '🌐 Global'}
-          </span>
-
-          {messages.length > 0 && (
-            <button
-              onClick={() => setShowClearConfirm(true)}
-              className="theme-toggle-btn"
-              title="Clear conversation history"
-              style={{ padding: '4px 6px', color: '#ef4444' }}
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
+          <button
+            onClick={handleClearHistory}
+            title="Очистить историю"
+            className="theme-toggle-btn"
+            style={{ padding: '3px 6px', color: '#ef4444' }}
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       </div>
 
-      {/* Messages Feed */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {messages.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', marginTop: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-            <Sparkles size={24} color="#3574f0" />
-            <span>{mode === 'chat' ? 'Conversation history is empty. Ask anything.' : `Agent active for project ${activeProject || '(select a project on the left)'}.`}</span>
+      {/* Индикатор текущего контекста агента */}
+      {mode === 'agent' && (
+        <div style={{ 
+          padding: '5px 12px', 
+          background: 'var(--bg-panel-sub)', 
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '11px'
+        }}>
+          <span style={{ color: 'var(--text-muted)' }}>
+            Проект: <b style={{ color: 'var(--text-main)' }}>{activeProject || 'Не выбран'}</b>
+          </span>
+          {activeFilePath && (
+            <span style={{ color: 'var(--text-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Файл: <b style={{ color: 'var(--text-main)' }}>{activeFilePath}</b>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Список сообщений */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {messages.length === 0 ? (
+          <div style={{ 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            color: 'var(--text-muted)',
+            textAlign: 'center',
+            padding: '0 20px',
+            gap: '8px'
+          }}>
+            {mode === 'chat' ? (
+              <>
+                <MessageSquare size={32} opacity={0.3} />
+                <p style={{ margin: 0, fontSize: '13px', fontWeight: 500 }}>Global AI Chat</p>
+                <p style={{ margin: 0, fontSize: '11.5px', lineHeight: 1.4 }}>
+                  Задавайте любые вопросы или создавайте проекты фразой:<br/>
+                  <code style={{ background: 'var(--hover-item)', padding: '2px 5px', borderRadius: '4px' }}>создай докер проект test-docker</code>
+                </p>
+              </>
+            ) : (
+              <>
+                <Sparkles size={32} opacity={0.3} />
+                <p style={{ margin: 0, fontSize: '13px', fontWeight: 500 }}>Project Developer Agent</p>
+                <p style={{ margin: 0, fontSize: '11.5px', lineHeight: 1.4 }}>
+                  {activeProject 
+                    ? `Агент готов к работе в контексте проекта "${activeProject}". Пишите команды генерации кода или анализа файлов.` 
+                    : 'Выберите проект в левой панели для активации агента.'}
+                </p>
+              </>
+            )}
           </div>
-        )}
-
-        {messages.map((m, i) => {
-          const isUser = m.role === 'user';
-          const isCopied = copiedIndex === i;
-
-          return (
+        ) : (
+          messages.map((m, idx) => (
             <div 
-              key={i} 
-              className="chat-message-bubble"
+              key={idx} 
               style={{
-                position: 'relative',
-                padding: '10px 14px',
-                borderRadius: '9px',
-                maxWidth: '88%',
-                alignSelf: isUser ? 'flex-end' : 'flex-start',
-                background: isUser ? '#3574f0' : 'var(--bg-card)',
-                color: isUser ? '#ffffff' : 'var(--text-main)',
-                border: isUser ? 'none' : '1px solid var(--border-color)',
-                fontSize: '12.5px',
-                lineHeight: 1.5,
-                boxShadow: isUser ? '0 2px 8px rgba(53, 116, 240, 0.28)' : '0 1px 3px rgba(0,0,0,0.05)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '6px',
-                userSelect: 'text'
+                alignItems: m.role === 'user' ? 'flex-end' : 'flex-start'
               }}
             >
-              {m.content && (
-                <button
-                  onClick={() => handleCopyMessage(m.content, i)}
-                  className="msg-copy-btn"
-                  title="Copy message"
-                  style={{
-                    position: 'absolute',
-                    top: '6px',
-                    right: '6px',
-                    background: isUser ? 'rgba(0, 0, 0, 0.3)' : 'var(--hover-item)',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '3px 6px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    color: isUser ? '#ffffff' : 'var(--text-muted)',
-                    fontSize: '10px'
-                  }}
-                >
-                  {isCopied ? <Check size={11} color={isUser ? '#ffffff' : '#10b981'} /> : <Copy size={11} />}
-                  {isCopied && <span>Copied!</span>}
-                </button>
-              )}
-
-              {m.images && m.images.map((imgBase64, idx) => (
-                <img 
-                  key={idx}
-                  src={`data:image/jpeg;base64,${imgBase64}`}
-                  alt="upload"
-                  style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '6px', objectFit: 'cover' }}
-                />
-              ))}
-
-              {m.role === 'assistant' && m.modelUsed && (
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  via {m.modelUsed}
+              {m.role === 'assistant' && (
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '5px', 
+                  marginBottom: '4px', 
+                  fontSize: '10px', 
+                  color: 'var(--text-muted)' 
+                }}>
+                  <Terminal size={11} color="var(--btn-primary)" />
+                  <span>{m.modelUsed || activeModelUsed || selectedOllama}</span>
                 </div>
               )}
 
-              {m.isStreamingToFile ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}>
-                  <FileCode2 size={16} />
-                  <span>{m.content}</span>
-                </div>
-              ) : (
-                <span style={{ whiteSpace: 'pre-wrap', color: isUser ? '#ffffff' : 'inherit' }}>
-                  {m.content}
-                </span>
-              )}
+              <div 
+                style={{
+                  maxWidth: '88%',
+                  padding: '9px 13px',
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  lineHeight: '1.45',
+                  wordBreak: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                  background: m.role === 'user' ? 'var(--btn-primary)' : 'var(--bg-card)',
+                  color: m.role === 'user' ? '#ffffff' : 'var(--text-main)',
+                  border: m.role === 'user' ? 'none' : '1px solid var(--border-color)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                }}
+              >
+                {m.images && m.images.length > 0 && (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    {m.images.map((img, i) => (
+                      <img 
+                        key={i} 
+                        src={`data:image/jpeg;base64,${img}`} 
+                        alt="attachment" 
+                        style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.2)' }}
+                      />
+                    ))}
+                  </div>
+                )}
+                {m.content}
+              </div>
             </div>
-          );
-        })}
+          ))
+        )}
 
-        {loading && (
-          <div style={{
-            alignSelf: 'flex-start',
-            background: 'var(--bg-card-sub)',
-            border: '1px solid var(--border-color)',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '11.5px',
-            color: 'var(--text-muted)'
-          }}>
-            <Loader2 size={14} className="spin-animate" color="#3574f0" />
-            <span>
-              {activeModelInfo 
-                ? `Running ${activeModelInfo}...` 
-                : (mode === 'agent' ? `Agent working in ${activeProject}...` : 'Thinking...')}
-            </span>
+        {isLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '11.5px' }}>
+            <Sparkles size={14} className="animate-spin" />
+            <span>Генерация ответа...</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div style={{ padding: '8px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-panel)' }}>
-        {attachedImage && (
-          <div style={{
-            position: 'relative',
-            width: 'fit-content',
-            background: 'var(--bg-editor)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '6px',
-            padding: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <img 
-              src={`data:image/jpeg;base64,${attachedImage}`} 
-              alt="attached" 
-              style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px' }}
-            />
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Image attached for MiniCPM-V</span>
-            <button 
-              onClick={() => setAttachedImage(null)}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-muted)' }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            accept="image/*" 
-            style={{ display: 'none' }} 
-          />
-
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="theme-toggle-btn"
-            title="Attach image"
-            style={{ padding: '6px 8px' }}
-          >
-            <Paperclip size={14} color={attachedImage ? "#3574f0" : "var(--text-muted)"} />
-          </button>
-
-          <input 
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={e => e.key === 'Enter' && !loading && sendMessage()}
-            placeholder={attachedImage ? "Ask a question about this image..." : (mode === 'chat' ? 'Ask anything...' : `Instruct agent working on ${activeProject || 'project'}...`)}
-            className="studio-input"
-            style={{ flex: 1 }}
-          />
-
-          {loading ? (
-            <button 
-              onClick={stopGeneration} 
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '6px 10px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontSize: '11px',
-                fontWeight: 600
-              }}
-              title="Stop generation & restore prompt"
-            >
-              <Square size={12} fill="#fff" />
-              <span>Stop</span>
-            </button>
-          ) : (
-            <button 
-              onClick={sendMessage} 
-              disabled={!input.trim() && !attachedImage}
-              className="btn-primary" 
-              style={{ padding: '6px 10px' }}
-            >
-              <Send size={13} />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {showClearConfirm && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(3px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 3000
-        }}>
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            width: '400px',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{
-                width: '38px', height: '38px', borderRadius: '50%', background: '#fee2e2',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444'
-              }}>
-                <AlertTriangle size={20} />
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Clear History
-                </h3>
-                <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {mode === 'chat' ? 'Clear all Global Chat messages?' : `Clear agent session for "${activeProject}"?`}
-                </p>
-              </div>
-            </div>
-
-            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-              This conversation history will be permanently deleted from the database.
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+      {/* Превью прикрепленных картинок */}
+      {selectedImages.length > 0 && (
+        <div style={{ padding: '6px 12px', display: 'flex', gap: '8px', background: 'var(--input-bg)', borderTop: '1px solid var(--border-color)' }}>
+          {selectedImages.map((b64, idx) => (
+            <div key={idx} style={{ position: 'relative' }}>
+              <img 
+                src={`data:image/jpeg;base64,${b64}`} 
+                alt="thumb" 
+                style={{ width: '45px', height: '45px', objectFit: 'cover', borderRadius: '4px' }} 
+              />
               <button
-                onClick={() => setShowClearConfirm(false)}
-                className="theme-toggle-btn"
-                style={{ padding: '6px 12px', fontSize: '12px' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmClearHistory}
+                onClick={() => setSelectedImages(prev => prev.filter((_, i) => i !== idx))}
                 style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
                   background: '#ef4444',
-                  color: '#ffffff',
+                  color: '#fff',
                   border: 'none',
-                  borderRadius: '6px',
-                  padding: '6px 14px',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: 'pointer'
+                  borderRadius: '50%',
+                  width: '15px',
+                  height: '15px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '9px'
                 }}
               >
-                Clear History
+                ✕
               </button>
             </div>
-          </div>
+          ))}
         </div>
       )}
+
+      {/* Поле ввода */}
+      <form 
+        onSubmit={handleSendMessage}
+        style={{ 
+          padding: '10px 12px', 
+          borderTop: '1px solid var(--border-color)', 
+          background: 'var(--bg-card)',
+          display: 'flex', 
+          gap: '8px', 
+          alignItems: 'center' 
+        }}
+      >
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleImageUpload} 
+          accept="image/*" 
+          multiple 
+          style={{ display: 'none' }} 
+        />
+
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          title="Прикрепить скриншот/изображение"
+          className="theme-toggle-btn"
+          style={{ padding: '6px 7px' }}
+        >
+          <Paperclip size={15} />
+        </button>
+
+        <input 
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          placeholder={mode === 'chat' ? "Спросите что-нибудь или: создай докер проект test-docker..." : "Укажите задачу для проекта..."}
+          className="studio-input"
+          style={{ flex: 1, padding: '7px 10px', fontSize: '12px' }}
+          disabled={isLoading}
+        />
+
+        <button 
+          type="submit" 
+          className="btn-primary" 
+          style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          disabled={isLoading || !inputVal.trim()}
+        >
+          <Send size={14} />
+        </button>
+      </form>
     </div>
   );
 }

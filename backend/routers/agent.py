@@ -96,15 +96,22 @@ async def execute_agent_task(task: AgentTask):
     if not os.path.exists(proj_path):
         raise HTTPException(status_code=404, detail="Project not found")
 
+    lower_prompt = task.prompt.lower().strip()
+
+    if any(k in lower_prompt for k in ["создай проект", "создать проект", "новый проект", "create project", "new project"]):
+        ignore_msg = f"Вы уже находитесь в контексте проекта `{task.project_name}`. Для создания нового проекта используйте вкладку Global Chat или кнопку «+» в левой панели."
+        async def ignore_stream():
+            yield {"data": json.dumps({"type": "meta", "model": target_model})}
+            yield {"data": json.dumps({"message": {"content": ignore_msg}})}
+        return EventSourceResponse(ignore_stream())
+
     file_tree = get_clean_project_files(proj_path)
 
-    # Детекция имени целевого файла
     write_patterns = [
         r"(?:заполни|напиши|вставь|создай код для|перепиши)\s+([a-zA-Z0-9_\-\.\/]+)",
         r"(?:fill|write|update)\s+([a-zA-Z0-9_\-\.\/]+)"
     ]
     target_match = None
-    lower_prompt = task.prompt.lower()
     for pattern in write_patterns:
         m = re.search(pattern, lower_prompt)
         if m:

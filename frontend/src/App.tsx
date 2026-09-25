@@ -15,11 +15,10 @@ export default function App() {
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
 
-  // Режим правой панели (Global Chat или Project Agent)
   const [chatMode, setChatMode] = useState<'chat' | 'agent'>('chat');
-
   const [fileHistory, setFileHistory] = useState<FileHistoryItem[]>([]);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<FileHistoryItem | null>(null);
+  const [treeRefreshTrigger, setTreeRefreshTrigger] = useState(0);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('studio_theme') as 'light' | 'dark') || 'light';
@@ -33,7 +32,7 @@ export default function App() {
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
-    showToast(`Switched to ${nextTheme} mode`, "info");
+    showToast(`Переключено на ${nextTheme === 'dark' ? 'тёмную' : 'светлую'} тему`, "info");
   };
 
   const loadHistoryForCurrentFile = useCallback((proj: string | null, filePath: string | null) => {
@@ -64,6 +63,20 @@ export default function App() {
       setSelectedHistoryItem(null);
     }
     setActiveFileContent(prev => isStart ? codeChunk : (prev + codeChunk));
+  };
+
+  // Мгновенная реакция на создание проекта из чата
+  const handleProjectCreatedFromChat = (projName: string, defaultFile?: string) => {
+    setActiveProject(projName);
+    setChatMode('agent');
+    setTreeRefreshTrigger(t => t + 1);
+
+    if (defaultFile) {
+      setActiveFile({ path: defaultFile, type: 'code' });
+      setSelectedHistoryItem(null);
+    }
+
+    showToast(`Проект "${projName}" успешно создан!`, "success");
   };
 
   const [leftWidth, setLeftWidth] = useState(280);
@@ -125,16 +138,15 @@ export default function App() {
             activeFilePath={activeFile?.path}
             fileHistory={fileHistory}
             selectedHistoryId={selectedHistoryItem?.id || null}
+            refreshTrigger={treeRefreshTrigger}
             onSelectProject={(proj) => {
               setActiveProject(proj);
               setSelectedHistoryItem(null);
-              // При выборе/создании/клике по проекту — переключаем чат на агента
               if (proj) setChatMode('agent');
             }}
             onOpenFile={(path, type) => {
               setActiveFile({ path, type });
               setSelectedHistoryItem(null);
-              // При открытии любого файла проекта — переключаем чат на агента
               setChatMode('agent');
             }}
             onCloseFile={() => {
@@ -177,11 +189,14 @@ export default function App() {
             selectedOllama={selectedOllama}
             selectedComfy={selectedComfy}
             onLiveStreamToEditor={handleLiveStreamToEditor}
+            onProjectCreatedFromChat={(projName, defaultFile) => {
+              handleProjectCreatedFromChat(projName, defaultFile);
+            }}
             onFileAutoSaved={(filePath, rev) => {
               if (activeFile?.path === filePath) {
                 handleAddNewRevision(rev);
               }
-              showToast(`File "${filePath}" updated and saved`, "success");
+              showToast(`Файл "${filePath}" успешно обновлен и сохранен`, "success");
             }}
           />
         </div>
