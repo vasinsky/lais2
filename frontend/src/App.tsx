@@ -4,6 +4,7 @@ import ProjectTree, { FileHistoryItem } from './components/LeftSidebar/ProjectTr
 import CenterEditor from './components/CenterEditor/CenterEditor';
 import RightPanel from './components/RightPanel/RightPanel';
 import MemoryModal from './components/MemoryModal';
+import ImageModal from './components/ImageModal';
 import { useToast } from './components/Toast';
 
 export default function App() {
@@ -14,6 +15,9 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<{ path: string; type: 'code' | 'image' } | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+
+  // Модалка полноразмерного просмотра картинок ComfyUI
+  const [previewImage, setPreviewImage] = useState<{ url: string; prompt?: string } | null>(null);
 
   const [chatMode, setChatMode] = useState<'chat' | 'agent'>('chat');
   const [fileHistory, setFileHistory] = useState<FileHistoryItem[]>([]);
@@ -65,7 +69,6 @@ export default function App() {
     setActiveFileContent(prev => isStart ? codeChunk : (prev + codeChunk));
   };
 
-  // Мгновенная реакция на создание проекта из чата
   const handleProjectCreatedFromChat = (projName: string, defaultFile?: string) => {
     setActiveProject(projName);
     setChatMode('agent');
@@ -198,6 +201,7 @@ export default function App() {
               }
               showToast(`Файл "${filePath}" успешно обновлен и сохранен`, "success");
             }}
+            onOpenImageModal={(url, prompt) => setPreviewImage({ url, prompt })}
           />
         </div>
       </div>
@@ -205,6 +209,13 @@ export default function App() {
       <MemoryModal 
         isOpen={isMemoryOpen} 
         onClose={() => setIsMemoryOpen(false)} 
+      />
+
+      <ImageModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        prompt={previewImage?.prompt}
+        onClose={() => setPreviewImage(null)}
       />
     </div>
   );

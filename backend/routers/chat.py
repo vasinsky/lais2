@@ -3,12 +3,13 @@ import re
 import json
 import httpx
 import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from sse_starlette.sse import EventSourceResponse
 import database
 from .projects import init_project_structure
+from comfy_service import generate_image_stream, interrupt_execution, COMFYUI_HTTP
 
 router = APIRouter()
 WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/workspace")
@@ -18,27 +19,59 @@ TRANSLATOR_MODEL = "dolphin-llama3:latest"
 VISION_MODEL = "minicpm-v:latest"
 DEFAULT_CODER_MODEL = "qwen2.5-coder:7b-instruct-q4_K_M"
 
+class ImageProgressInfo(BaseModel):
+    step: int
+    total: int
+    percent: int
+    status: str
+
 class ChatMessage(BaseModel):
     role: str
     content: str
     images: Optional[List[str]] = None
     modelUsed: Optional[str] = None
+    generated_image: Optional[str] = None
+    image_prompt: Optional[str] = None
+    image_progress: Optional[ImageProgressInfo] = None
 
 class ChatPayload(BaseModel):
     model: Optional[str] = None
+    comfy_checkpoint: Optional[str] = None
     messages: List[ChatMessage]
     stream: Optional[bool] = True
+
+@router.post("/interrupt")
+async def stop_generation():
+    """Отменяет текущую генерацию в ComfyUI"""
+    success = await interrupt_execution()
+    return {"status": "interrupted" if success else "failed"}
+
+@router.get("/image/view")
+async def view_comfy_image(filename: str, subfolder: str = "", type: str = "output"):
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        try:
+            r = await client.get(
+                f"{COMFYUI_HTTP}/view",
+                params={"filename": filename, "subfolder": subfolder, "type": type}
+            )
+            if r.status_code == 200:
+                return Response(
+                    content=r.content, 
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+            raise HTTPException(status_code=r.status_code, detail="Image not found in ComfyUI")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 def parse_project_creation_intent(text: str):
     raw = text.strip()
     lower = raw.lower()
 
-    # 1. Проверяем, есть ли запрос на создание
     trigger_words = ["создай", "создать", "сделай", "новый проект", "create", "new"]
     if not any(w in lower for w in trigger_words):
         return None
 
-    # 2. Определяем тип проекта по контексту
     ptype = "static"
     if any(k in lower for k in ["докер", "docker"]):
         ptype = "docker"
@@ -47,14 +80,11 @@ def parse_project_creation_intent(text: str):
     elif any(k in lower for k in ["статич", "static", "лендинг", "landing", "веб", "web"]):
         ptype = "static"
 
-    # 3. Извлекаем название проекта (строго после слова "проект" или "project")
-    # Поддерживаем буквы, цифры, дефис '-' и лоу дэш '_'
     match = re.search(r"(?:проект|project)\s+([a-zA-Z0-9_\-]+)", raw, re.IGNORECASE)
     if match:
         proj_name = match.group(1).strip()
         return {"name": proj_name, "project_type": ptype}
 
-    # Если слово "проект" пропущено, берем последнее валидное имя
     fallback_match = re.search(r"(?:создай|создать|сделай|create|new)\s+(?:статичный|статический|докер|docker|пайтон|python|питон|лендинг|landing)?\s*([a-zA-Z0-9_\-]+)", raw, re.IGNORECASE)
     if fallback_match:
         candidate = fallback_match.group(1).strip()
@@ -63,6 +93,41 @@ def parse_project_creation_intent(text: str):
             return {"name": candidate, "project_type": ptype}
 
     return None
+
+def parse_image_generation_intent(text: str) -> Optional[str]:
+    raw = text.strip()
+    patterns = [
+        r"^(?:создай|сделай|сгенерируй|нарисуй)\s+(?:мне\s+)?(?:картинку|изображение|арт|рисунок|фото)\s*(?:про|с|на\s+тему|:)?\s*(.+)$",
+        r"^(?:generate|create|draw)\s+(?:an?\s+)?(?:image|picture|photo|art)\s*(?:of|about|:)?\s*(.+)$"
+    ]
+    for pat in patterns:
+        m = re.search(pat, raw, re.IGNORECASE)
+        if m:
+            desc = m.group(1).strip()
+            if desc:
+                return desc
+    return None
+
+async def enhance_prompt_for_sd(user_desc: str, client: httpx.AsyncClient) -> str:
+    system_prompt = (
+        "You are an uncensored expert prompt engineer for Stable Diffusion. "
+        "Convert the user's description into a high quality, detailed English prompt for image generation. "
+        "Include stylistic tags like masterpiece, 8k resolution, highly detailed, dramatic lighting where appropriate. "
+        "Output ONLY the prompt in plain English, without quotes, markdown or explanations."
+    )
+    try:
+        res = await client.post(f"{OLLAMA_URL}/api/generate", json={
+            "model": TRANSLATOR_MODEL,
+            "prompt": f"{system_prompt}\n\nUser request: {user_desc}\n\nPrompt:",
+            "stream": False
+        }, timeout=35.0)
+        if res.status_code == 200:
+            enhanced = res.json().get("response", "").strip()
+            if enhanced:
+                return enhanced
+    except Exception:
+        pass
+    return user_desc
 
 async def translate_text_to_english(text: str, client: httpx.AsyncClient) -> str:
     if not text.strip():
@@ -121,9 +186,71 @@ async def chat_stream(payload: ChatPayload):
     target_model = payload.model or DEFAULT_CODER_MODEL
     has_images = any(m.images and len(m.images) > 0 for m in payload.messages)
     last_user_msg = payload.messages[-1]
+    checkpoint = payload.comfy_checkpoint or "Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
 
+    # --- 1. ОБРАБОТКА ГЕНЕРАЦИИ КАРТИНКИ ЧЕРЕЗ COMFYUI ---
+    img_desc = parse_image_generation_intent(last_user_msg.content)
+    if img_desc:
+        now_iso = datetime.datetime.utcnow().isoformat()
+        if database.db is not None:
+            await database.db.chat_threads.update_one(
+                {"thread_id": "global_chat"},
+                {"$push": {"messages": {                     "role": "user",                     "content": last_user_msg.content,                     "created_at": now_iso                 }}, "$set": {"updated_at": now_iso}},
+                upsert=True
+            )
+
+        async def image_event_generator():
+            yield {"data": json.dumps({"type": "meta", "model": f"ComfyUI ({checkpoint})", "is_image_task": True})}
+
+            # Перевод и расширение промпта через dolphin-llama3
+            async with httpx.AsyncClient(timeout=35.0, trust_env=False) as client:
+                sd_prompt = await enhance_prompt_for_sd(img_desc, client)
+
+            yield {"data": json.dumps({
+                "type": "image_prompt_ready",
+                "prompt": sd_prompt,
+                "status": "Prompt generated. Connecting to ComfyUI..."
+            })}
+
+            final_img_url = None
+            last_progress = {"step": 20, "total": 20, "percent": 100, "status": "Completed"}
+
+            async for ev in generate_image_stream(sd_prompt, checkpoint):
+                yield {"data": json.dumps(ev)}
+                if ev.get("type") == "image_progress":
+                    last_progress = {
+                        "step": ev.get("step", 0),
+                        "total": ev.get("total", 20),
+                        "percent": ev.get("percent", 0),
+                        "status": ev.get("status", "")
+                    }
+                elif ev.get("type") == "image_complete":
+                    final_img_url = ev.get("image_url")
+                elif ev.get("type") == "image_error":
+                    last_progress["status"] = ev.get("error", "Error")
+
+            # Сохранение полного сообщения со всеми артефактами в MongoDB
+            if database.db is not None:
+                await database.db.chat_threads.update_one(
+                    {"thread_id": "global_chat"},
+                    {"$push": {"messages": {
+                        "role": "assistant",
+                        "content": "Image generation completed." if final_img_url else f"Generation failed: {last_progress.get('status')}",
+                        "generated_image": final_img_url,
+                        "image_prompt": sd_prompt,
+                        "image_progress": last_progress,
+                        "modelUsed": f"ComfyUI ({checkpoint})",
+                        "created_at": datetime.datetime.utcnow().isoformat()
+                    }}}
+                )
+
+        return EventSourceResponse(
+            image_event_generator(),
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
+
+    # --- 2. ОБРАБОТКА СОЗДАНИЯ ПРОЕКТА ---
     project_intent = parse_project_creation_intent(last_user_msg.content)
-
     if project_intent:
         proj_name = project_intent["name"]
         proj_type = project_intent["project_type"]
@@ -145,7 +272,7 @@ async def chat_stream(payload: ChatPayload):
             )
 
             now_iso = datetime.datetime.utcnow().isoformat()
-            agent_init_reply = f"Проект `{proj_name}` ({proj_type}) успешно создан. Контекст загружен."
+            agent_init_reply = f"Project `{proj_name}` ({proj_type}) initialized successfully. Context loaded."
             await database.db.agent_sessions.update_one(
                 {"project_name": proj_name},
                 {"$push": {"messages": {
@@ -167,22 +294,25 @@ async def chat_stream(payload: ChatPayload):
                 "project_type": proj_type,
                 "default_file": default_file
             })}
-        return EventSourceResponse(create_event())
+        return EventSourceResponse(create_event(), headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    cursor = database.db.system_prompts.find({"is_active": True})
+    # --- 3. СТАНДАРТНЫЙ ЧАТ OLLAMA ---
+    cursor = database.db.system_prompts.find({"is_active": True}) if database.db is not None else []
     active_rules = []
-    async for doc in cursor:
-        p = doc.get("prompt", "").strip()
-        if p:
-            active_rules.append(p)
+    if database.db is not None:
+        async for doc in cursor:
+            p = doc.get("prompt", "").strip()
+            if p:
+                active_rules.append(p)
     global_rules_text = "\n\n".join(active_rules)
 
     now_iso = datetime.datetime.utcnow().isoformat()
-    await database.db.chat_threads.update_one(
-        {"thread_id": "global_chat"},
-        {"$push": {"messages": {             "role": "user",             "content": last_user_msg.content,             "images": last_user_msg.images,             "created_at": now_iso         }}, "$set": {"updated_at": now_iso}},
-        upsert=True
-    )
+    if database.db is not None:
+        await database.db.chat_threads.update_one(
+            {"thread_id": "global_chat"},
+            {"$push": {"messages": {                 "role": "user",                 "content": last_user_msg.content,                 "images": last_user_msg.images,                 "created_at": now_iso             }}, "$set": {"updated_at": now_iso}},
+            upsert=True
+        )
 
     async def event_generator():
         yield {"data": json.dumps({"type": "meta", "model": target_model})}
@@ -227,7 +357,7 @@ async def chat_stream(payload: ChatPayload):
             except Exception as e:
                 yield {"data": json.dumps({"error": str(e)})}
 
-            if assistant_full_reply:
+            if assistant_full_reply and database.db is not None:
                 await database.db.chat_threads.update_one(
                     {"thread_id": "global_chat"},
                     {"$push": {"messages": {
@@ -238,4 +368,4 @@ async def chat_stream(payload: ChatPayload):
                     }}}
                 )
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
