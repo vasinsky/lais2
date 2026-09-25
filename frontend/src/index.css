@@ -1,0 +1,298 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-app: #eef1f5;
+  --bg-header: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-sub: #f8fafc;
+  --bg-editor: #ffffff;
+  --border-color: #e2e8f0;
+  --border-divider: #cbd5e1;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --btn-primary: #3574f0;
+  --btn-primary-hover: #2662dc;
+  --input-bg: #f8fafc;
+  --input-border: #cbd5e1;
+  --hover-item: #f1f5f9;
+  --card-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --resize-divider: #cbd5e1;
+  --resize-hover: #3574f0;
+}
+
+[data-theme="dark"] {
+  --bg-app: #121316;
+  --bg-header: #1a1b1f;
+  --bg-card: #1a1b1f;
+  --bg-card-sub: #212328;
+  --bg-editor: #16171a;
+  --border-color: #2a2d35;
+  --border-divider: #363943;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --btn-primary: #3574f0;
+  --btn-primary-hover: #4682f7;
+  --input-bg: #212328;
+  --input-border: #363943;
+  --hover-item: #282a32;
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --resize-divider: #2a2d35;
+  --resize-hover: #3574f0;
+}
+
+html, body, #root {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+}
+
+.studio-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-app);
+}
+
+.studio-header {
+  height: 48px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.header-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-divider);
+  margin: 0 4px;
+}
+
+.studio-main {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - 48px);
+  padding: 8px;
+  gap: 0;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.panel-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.resize-gutter {
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+
+.resize-gutter::after {
+  content: "";
+  width: 3px;
+  height: 32px;
+  background: var(--resize-divider);
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.resize-gutter:hover::after,
+.resize-gutter.active::after {
+  background: var(--resize-hover);
+  height: 54px;
+}
+
+.resize-gutter-horizontal {
+  height: 8px;
+  width: 100%;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.resize-gutter-horizontal::after {
+  content: "";
+  height: 2px;
+  width: 32px;
+  background: var(--resize-divider);
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.resize-gutter-horizontal:hover::after {
+  background: var(--resize-hover);
+  width: 50px;
+}
+
+select.studio-select {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-main);
+  font-size: 11.5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+input.studio-input, textarea.studio-input {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-main);
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  outline: none;
+}
+
+.btn-primary {
+  background: var(--btn-primary);
+  color: #ffffff;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.btn-primary:hover {
+  background: var(--btn-primary-hover);
+}
+
+/* Эффект нажатия на все кнопки */
+button:active,
+.btn-primary:active,
+.theme-toggle-btn:active {
+  transform: scale(0.95);
+  filter: brightness(0.92);
+}
+
+.theme-toggle-btn {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-main);
+  border-radius: 6px;
+  padding: 5px 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: all 0.15s ease, transform 0.05s ease;
+}
+.theme-toggle-btn:hover {
+  background: var(--hover-item);
+}
+
+.tooltip-container {
+  position: relative;
+}
+
+.tooltip-bubble {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.tooltip-container:hover .tooltip-bubble {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Яркая активная подсветка выбранной истории файла */
+.history-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.history-item-row:hover {
+  background: var(--hover-item);
+  color: var(--text-main);
+}
+
+.history-item-row.is-active {
+  background: rgba(53, 116, 240, 0.18) !important;
+  color: var(--btn-primary) !important;
+  font-weight: 700 !important;
+  border: 1.5px solid var(--btn-primary) !important;
+  box-shadow: 0 1px 6px rgba(53, 116, 240, 0.25) !important;
+}
+
+/* Тостер */
+@keyframes toast-slide-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

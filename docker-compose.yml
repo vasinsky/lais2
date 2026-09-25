@@ -1,0 +1,48 @@
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: studio_mongo
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT}:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build: ./backend
+    container_name: studio_backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT}:8000"
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - COMFY_URL=${COMFY_URL}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - HTTP_PROXY=socks5://host.docker.internal:10808
+      - HTTPS_PROXY=socks5://host.docker.internal:10808
+      - ALL_PROXY=socks5://host.docker.internal:10808
+      - NO_PROXY=127.0.0.1,localhost,host.docker.internal,mongo
+      - PROJECTS_ROOT_DIR=${PROJECTS_ROOT_DIR}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      - studio_workspace:/app/workspace
+    depends_on:
+      - mongo
+
+  frontend:
+    build: ./frontend
+    container_name: studio_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  studio_workspace:
