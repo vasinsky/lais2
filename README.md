@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/banner.svg" alt="Local AI Studio Banner" width="100%" />
+</p>
+
 # Local AI Studio
 
 Self-hosted AI Development Environment: Autonomous Code Assistant & Visual Generation.
@@ -8,7 +12,8 @@ Self-hosted AI Development Environment: Autonomous Code Assistant & Visual Gener
 
 ## English
 
-> **Note:** This project is currently in active development. Features and interfaces may change.
+> ### ⚠️ WORK IN PROGRESS / IN ACTIVE DEVELOPMENT
+> **Notice:** This project is currently in early active development. APIs, architecture, and UI features are subject to frequent changes and improvements.
 
 ### Overview
 Local AI Studio is a self-hosted workspace combining local Large Language Models (LLMs via Ollama) and image generation pipelines (ComfyUI). It provides a full developer workflow for creating, refactoring, and previewing code alongside AI-assisted visual asset production—all containerized and private.
@@ -83,7 +88,8 @@ Open `http://localhost:3000` in your browser.
 
 ## Русский
 
-> **Внимание:** Проект находится в активной разработке. Функционал и интерфейс могут обновляться и дорабатываться.
+> ### ⚠️ ВНИМАНИЕ: ПРОЕКТ НАХОДИТСЯ В СТАДИИ РАЗРАБОТКИ
+> **Примечание:** Проект находится в стадии активной разработки и тестирования (WIP). Интерфейс, логика работы агентов и структура API могут активно изменяться и дополняться.
 
 ### Описание проекта
 Local AI Studio — это локальная среда разработки и генерации, объединяющая возможности локальных языковых моделей (LLM через Ollama) и генерации изображений (ComfyUI). Платформа предоставляет интерфейс для кодогенерации, навигации по проектам, ревизии версий файлов и создания графических ассетов прямо в проекте без передачи данных во внешние облака.
