@@ -36,7 +36,7 @@ export default function App() {
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
-    showToast(`Переключено на ${nextTheme === 'dark' ? 'тёмную' : 'светлую'} тему`, "info");
+    showToast(`Switched to ${nextTheme} theme`, "info");
   };
 
   const loadHistoryForCurrentFile = useCallback((proj: string | null, filePath: string | null) => {
@@ -69,6 +69,14 @@ export default function App() {
     setActiveFileContent(prev => isStart ? codeChunk : (prev + codeChunk));
   };
 
+  const handleInsertCodeToEditor = (codeSnippet: string) => {
+    if (!activeFile) {
+      showToast("Open a file in the center editor first", "error");
+      return;
+    }
+    setActiveFileContent(codeSnippet);
+  };
+
   const handleProjectCreatedFromChat = (projName: string, defaultFile?: string) => {
     setActiveProject(projName);
     setChatMode('agent');
@@ -79,7 +87,7 @@ export default function App() {
       setSelectedHistoryItem(null);
     }
 
-    showToast(`Проект "${projName}" успешно создан!`, "success");
+    showToast(`Project "${projName}" created successfully!`, "success");
   };
 
   const [leftWidth, setLeftWidth] = useState(280);
@@ -199,9 +207,11 @@ export default function App() {
               if (activeFile?.path === filePath) {
                 handleAddNewRevision(rev);
               }
-              showToast(`Файл "${filePath}" успешно обновлен и сохранен`, "success");
+              showToast(`File "${filePath}" updated and saved`, "success");
             }}
             onOpenImageModal={(url, prompt) => setPreviewImage({ url, prompt })}
+            onInsertCodeToEditor={handleInsertCodeToEditor}
+            onRefreshProjectTree={() => setTreeRefreshTrigger(t => t + 1)}
           />
         </div>
       </div>

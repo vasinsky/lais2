@@ -1,3 +1,5 @@
+import httpx
+
 import os
 import shutil
 import datetime
@@ -453,3 +455,68 @@ async def clear_file_history(project_name: str, path: str = Query(...)):
         "file_path": {"$in": [clean_path, f"/{clean_path}"]}
     })
     return {"status": "cleared", "file_path": clean_path}
+
+class SaveImagePayload(BaseModel):
+    image_url: str
+    target_dir: Optional[str] = ""
+    filename: Optional[str] = None
+
+@router.post("/{project_name}/save-image")
+async def save_image_to_project(project_name: str, payload: SaveImagePayload):
+    proj_path = os.path.join(WORKSPACE_DIR, project_name)
+    if not os.path.exists(proj_path):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    target_dir_clean = payload.target_dir.strip("/").strip("\\") if payload.target_dir else ""
+    target_folder = os.path.join(proj_path, target_dir_clean) if target_dir_clean else proj_path
+    os.makedirs(target_folder, exist_ok=True)
+
+    filename = payload.filename or f"generated_{int(datetime.datetime.utcnow().timestamp())}.png"
+    if not filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        filename += ".png"
+
+    dest_file = os.path.join(target_folder, filename)
+
+    try:
+        from urllib.parse import urlparse, parse_qs
+        comfy_host = os.getenv("COMFYUI_HOST", "host.docker.internal:8188")
+        comfy_http = f"http://{comfy_host}"
+
+        parsed = urlparse(payload.image_url)
+        params = parse_qs(parsed.query)
+
+        # Если это ссылка на наш view-эндпоинт, берем напрямую из ComfyUI
+        if "filename" in params:
+            cf_filename = params["filename"][0]
+            cf_subfolder = params.get("subfolder", [""])[0]
+            cf_type = params.get("type", ["output"])[0]
+
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                r = await client.get(
+                    f"{comfy_http}/view",
+                    params={"filename": cf_filename, "subfolder": cf_subfolder, "type": cf_type}
+                )
+                if r.status_code == 200:
+                    with open(dest_file, "wb") as f:
+                        f.write(r.content)
+                else:
+                    raise HTTPException(status_code=400, detail=f"ComfyUI returned {r.status_code}")
+        elif payload.image_url.startswith("data:image"):
+            import base64
+            parts = payload.image_url.split(",", 1)
+            b64_str = parts[1] if len(parts) > 1 else parts[0]
+            with open(dest_file, "wb") as f:
+                f.write(base64.b64decode(b64_str))
+        else:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                r = await client.get(payload.image_url)
+                if r.status_code == 200:
+                    with open(dest_file, "wb") as f:
+                        f.write(r.content)
+                else:
+                    raise HTTPException(status_code=400, detail="Cannot download source image")
+
+        rel_path = os.path.relpath(dest_file, proj_path).replace("\\", "/")
+        return {"status": "success", "file_path": rel_path, "filename": filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

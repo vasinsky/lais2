@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Sparkles, MessageSquare, Terminal, Trash2, Paperclip,
-  Maximize2, Image as ImageIcon, Square, Loader2
+  Maximize2, Image as ImageIcon, Square, Loader2, Copy, Check,
+  Code, ArrowDownToLine, FolderPlus
 } from 'lucide-react';
 import { useToast } from '../Toast';
 import { FileHistoryItem } from '../LeftSidebar/ProjectTree';
@@ -36,6 +37,8 @@ interface Props {
   onProjectCreatedFromChat: (projName: string, defaultFile?: string) => void;
   onFileAutoSaved: (filePath: string, revision: FileHistoryItem) => void;
   onOpenImageModal?: (imageUrl: string, prompt?: string) => void;
+  onInsertCodeToEditor?: (code: string) => void;
+  onRefreshProjectTree?: () => void;
 }
 
 export default function RightPanel({
@@ -49,7 +52,9 @@ export default function RightPanel({
   onLiveStreamToEditor,
   onProjectCreatedFromChat,
   onFileAutoSaved,
-  onOpenImageModal
+  onOpenImageModal,
+  onInsertCodeToEditor,
+  onRefreshProjectTree
 }: Props) {
   const { showToast } = useToast();
   const [inputVal, setInputVal] = useState('');
@@ -57,6 +62,8 @@ export default function RightPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [activeModelUsed, setActiveModelUsed] = useState<string | null>(null);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [copiedCodeIdx, setCopiedCodeIdx] = useState<string | null>(null);
+  const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -112,6 +119,77 @@ export default function RightPanel({
     }
   };
 
+  const handleDeleteMessage = async (idx: number) => {
+    try {
+      const url = mode === 'chat' 
+        ? `http://localhost:8000/api/chat/messages/${idx}`
+        : `http://localhost:8000/api/agent/${encodeURIComponent(activeProject || '')}/messages/${idx}`;
+      
+      const res = await fetch(url, { method: 'DELETE' });
+      if (res.ok) {
+        setMessages(prev => prev.filter((_, i) => i !== idx));
+        showToast("Message deleted", "info");
+      }
+    } catch {
+      showToast("Failed to delete message", "error");
+    }
+  };
+
+  const handleCopyText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard", "success");
+  };
+
+  const handleCopyImage = async (imgUrl: string) => {
+    try {
+      const res = await fetch(imgUrl);
+      const blob = await res.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob })
+      ]);
+      showToast("Image copied to clipboard", "success");
+    } catch {
+      navigator.clipboard.writeText(imgUrl);
+      showToast("Image URL copied to clipboard", "info");
+    }
+  };
+
+  const handleSaveImageToProject = async (imageUrl: string) => {
+    if (!activeProject) {
+      showToast("Select a project first in the left tree", "error");
+      return;
+    }
+
+    let targetDirectory = "";
+    if (activeFilePath) {
+      const parts = activeFilePath.split('/');
+      if (parts.length > 1) {
+        targetDirectory = parts.slice(0, -1).join('/');
+      }
+    }
+
+    try {
+      const res = await fetch(`http://localhost:8000/api/projects/${encodeURIComponent(activeProject)}/save-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: imageUrl,
+          target_dir: targetDirectory
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`Image saved: ${data.file_path}`, "success");
+        if (onRefreshProjectTree) onRefreshProjectTree();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.detail || "Failed to save image", "error");
+      }
+    } catch {
+      showToast("Network error saving image", "error");
+    }
+  };
+
   const handleCancelGeneration = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -140,6 +218,107 @@ export default function RightPanel({
       reader.readAsDataURL(file);
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const renderMessageContent = (content: string, msgIdx: number) => {
+    const codeBlockRegex = /```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```/g;
+    const elements: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      const matchIndex = match.index;
+      if (matchIndex > lastIndex) {
+        elements.push(
+          <span key={`text-${lastIndex}`}>{content.substring(lastIndex, matchIndex)}</span>
+        );
+      }
+
+      const lang = match[1] || 'code';
+      const codeSnippet = match[2];
+      const blockKey = `${msgIdx}-${matchIndex}`;
+
+      elements.push(
+        <div 
+          key={`code-${blockKey}`}
+          style={{
+            margin: '8px 0',
+            borderRadius: '6px',
+            overflow: 'hidden',
+            border: '1px solid var(--border-color)',
+            background: 'var(--bg-panel-sub)'
+          }}
+        >
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '4px 8px',
+            background: 'var(--bg-panel)',
+            borderBottom: '1px solid var(--border-color)',
+            fontSize: '11px',
+            color: 'var(--text-muted)'
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', textTransform: 'lowercase' }}>
+              <Code size={12} />
+              {lang}
+            </span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(codeSnippet);
+                  setCopiedCodeIdx(blockKey);
+                  setTimeout(() => setCopiedCodeIdx(null), 2000);
+                  showToast("Code copied", "success");
+                }}
+                className="theme-toggle-btn"
+                style={{ padding: '2px 6px', fontSize: '10.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                title="Copy code to clipboard"
+              >
+                {copiedCodeIdx === blockKey ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+                {copiedCodeIdx === blockKey ? "Copied" : "Copy"}
+              </button>
+
+              {onInsertCodeToEditor && activeFilePath && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onInsertCodeToEditor(codeSnippet);
+                    showToast(`Inserted code into ${activeFilePath}`, "success");
+                  }}
+                  className="theme-toggle-btn"
+                  style={{ padding: '2px 6px', fontSize: '10.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title="Insert into active editor"
+                >
+                  <ArrowDownToLine size={11} color="var(--btn-primary)" />
+                  Insert
+                </button>
+              )}
+            </div>
+          </div>
+          <pre style={{
+            margin: 0,
+            padding: '8px 10px',
+            fontSize: '11.5px',
+            fontFamily: 'monospace',
+            overflowX: 'auto',
+            whiteSpace: 'pre-wrap',
+            background: 'var(--bg-card)'
+          }}>
+            <code>{codeSnippet}</code>
+          </pre>
+        </div>
+      );
+
+      lastIndex = codeBlockRegex.lastIndex;
+    }
+
+    if (lastIndex < content.length) {
+      elements.push(<span key={`text-${lastIndex}`}>{content.substring(lastIndex)}</span>);
+    }
+
+    return elements;
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -212,7 +391,6 @@ export default function RightPanel({
                   setActiveModelUsed(data.model);
                   if (data.is_image_task) {
                     isImageTask = true;
-                    // Создаем базовое сообщение ассистента с прогрессом
                     setMessages(prev => [...prev, {
                       role: 'assistant',
                       content: 'Translating prompt with dolphin-llama3...',
@@ -487,7 +665,7 @@ export default function RightPanel({
       )}
 
       {/* Messages Feed */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {messages.length === 0 ? (
           <div style={{ 
             height: '100%', 
@@ -527,25 +705,60 @@ export default function RightPanel({
           messages.map((m, idx) => (
             <div 
               key={idx} 
+              onMouseEnter={() => setHoveredMsgIdx(idx)}
+              onMouseLeave={() => setHoveredMsgIdx(null)}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: m.role === 'user' ? 'flex-end' : 'flex-start'
+                alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
+                position: 'relative'
               }}
             >
-              {m.role === 'assistant' && (
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                marginBottom: '4px', 
+                fontSize: '10.5px', 
+                color: 'var(--text-muted)' 
+              }}>
+                {m.role === 'assistant' ? (
+                  <>
+                    {m.generated_image || m.image_progress ? <ImageIcon size={11} color="#10b981" /> : <Terminal size={11} color="var(--btn-primary)" />}
+                    <span>{m.modelUsed || activeModelUsed || selectedOllama}</span>
+                  </>
+                ) : (
+                  <span>You</span>
+                )}
+                
+                {/* Actions: Copy & Delete — видны ТОЛЬКО при наведении на сообщение */}
                 <div style={{ 
-                  display: 'flex', 
+                  display: 'inline-flex', 
                   alignItems: 'center', 
-                  gap: '5px', 
-                  marginBottom: '4px', 
-                  fontSize: '10px', 
-                  color: 'var(--text-muted)' 
+                  gap: '4px', 
+                  marginLeft: '6px',
+                  opacity: hoveredMsgIdx === idx ? 1 : 0,
+                  pointerEvents: hoveredMsgIdx === idx ? 'auto' : 'none',
+                  transition: 'opacity 0.15s ease-in-out'
                 }}>
-                  {m.generated_image || m.image_progress ? <ImageIcon size={11} color="#10b981" /> : <Terminal size={11} color="var(--btn-primary)" />}
-                  <span>{m.modelUsed || activeModelUsed || selectedOllama}</span>
+                  <button
+                    onClick={() => handleCopyText(m.content)}
+                    className="theme-toggle-btn"
+                    title="Copy message text"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <Copy size={11} />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMessage(idx)}
+                    className="theme-toggle-btn"
+                    title="Delete message"
+                    style={{ padding: '2px 4px', color: '#ef4444' }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
-              )}
+              </div>
 
               <div 
                 style={{
@@ -555,7 +768,6 @@ export default function RightPanel({
                   fontSize: '12.5px',
                   lineHeight: '1.45',
                   wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
                   background: m.role === 'user' ? 'var(--btn-primary)' : 'var(--bg-card)',
                   color: m.role === 'user' ? '#ffffff' : 'var(--text-main)',
                   border: m.role === 'user' ? 'none' : '1px solid var(--border-color)',
@@ -616,45 +828,16 @@ export default function RightPanel({
                   </div>
                 )}
 
-                {/* Generated Image Preview */}
+                {/* Generated Image Preview + Hover Actions */}
                 {m.generated_image && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
-                    <div 
-                      style={{ 
-                        position: 'relative', 
-                        borderRadius: '8px', 
-                        overflow: 'hidden', 
-                        border: '1px solid var(--border-color)',
-                        cursor: 'pointer',
-                        maxHeight: '260px',
-                        background: '#111'
-                      }}
-                      onClick={() => onOpenImageModal && onOpenImageModal(m.generated_image!, m.image_prompt)}
-                      title="Click to view full size"
-                    >
-                      <img 
-                        src={m.generated_image} 
-                        alt="generated art" 
-                        style={{ width: '100%', display: 'block', objectFit: 'contain' }}
-                      />
-                      <div style={{
-                        position: 'absolute',
-                        right: '8px',
-                        bottom: '8px',
-                        background: 'rgba(0, 0, 0, 0.7)',
-                        color: '#fff',
-                        borderRadius: '4px',
-                        padding: '3px 6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '10px'
-                      }}>
-                        <Maximize2 size={11} />
-                        Enlarge
-                      </div>
-                    </div>
-                  </div>
+                  <ImageCardWithHover 
+                    imageUrl={m.generated_image}
+                    prompt={m.image_prompt}
+                    activeProject={activeProject}
+                    onCopy={() => handleCopyImage(m.generated_image!)}
+                    onSave={() => handleSaveImageToProject(m.generated_image!)}
+                    onEnlarge={() => onOpenImageModal && onOpenImageModal(m.generated_image!, m.image_prompt)}
+                  />
                 )}
 
                 {/* SD Prompt Section */}
@@ -673,7 +856,8 @@ export default function RightPanel({
                   </div>
                 )}
 
-                {m.content}
+                {/* Content with code block insertion & copying */}
+                {renderMessageContent(m.content, idx)}
               </div>
             </div>
           ))
@@ -806,6 +990,128 @@ export default function RightPanel({
           </button>
         )}
       </form>
+    </div>
+  );
+}
+
+// Отдельный легковесный компонент для изоляции hover-эффекта кнопок на картинке
+function ImageCardWithHover({
+  imageUrl,
+  prompt,
+  activeProject,
+  onCopy,
+  onSave,
+  onEnlarge
+}: {
+  imageUrl: string;
+  prompt?: string;
+  activeProject: string | null;
+  onCopy: () => void;
+  onSave: () => void;
+  onEnlarge: () => void;
+}) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <div 
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{ 
+        position: 'relative', 
+        borderRadius: '8px', 
+        overflow: 'hidden', 
+        border: '1px solid var(--border-color)',
+        maxHeight: '260px',
+        background: '#111',
+        marginBottom: '8px'
+      }}
+    >
+      <img 
+        src={imageUrl} 
+        alt="generated art" 
+        style={{ width: '100%', display: 'block', objectFit: 'contain', cursor: 'pointer' }}
+        onClick={onEnlarge}
+      />
+      
+      {/* Кнопки действий видны ТОЛЬКО при наведении на картинку */}
+      <div style={{
+        position: 'absolute',
+        right: '8px',
+        bottom: '8px',
+        display: 'flex',
+        gap: '6px',
+        opacity: isHovered ? 1 : 0,
+        pointerEvents: isHovered ? 'auto' : 'none',
+        transition: 'opacity 0.2s ease-in-out'
+      }}>
+        <button
+          type="button"
+          onClick={onCopy}
+          style={{
+            background: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(4px)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '5px',
+            padding: '4px 7px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '10.5px',
+            cursor: 'pointer'
+          }}
+          title="Copy image to clipboard"
+        >
+          <Copy size={11} />
+          Copy
+        </button>
+
+        {activeProject && (
+          <button
+            type="button"
+            onClick={onSave}
+            style={{
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(4px)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '5px',
+              padding: '4px 7px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '10.5px',
+              cursor: 'pointer'
+            }}
+            title="Save image to project directory"
+          >
+            <FolderPlus size={11} />
+            Save to Project
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={onEnlarge}
+          style={{
+            background: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(4px)',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '5px',
+            padding: '4px 7px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '10.5px',
+            cursor: 'pointer'
+          }}
+          title="View full size"
+        >
+          <Maximize2 size={11} />
+          Enlarge
+        </button>
+      </div>
     </div>
   );
 }

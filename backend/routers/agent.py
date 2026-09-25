@@ -273,3 +273,43 @@ async def execute_agent_task(task: AgentTask):
                 )
 
     return EventSourceResponse(event_generator())
+
+@router.delete("/{project_name}/messages/{index}")
+async def delete_agent_message(project_name: str, index: int):
+    if database.db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    session = await database.db.agent_sessions.find_one({"project_name": project_name})
+    if not session or "messages" not in session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    messages = session.get("messages", [])
+    if index < 0 or index >= len(messages):
+        raise HTTPException(status_code=400, detail="Invalid message index")
+    
+    messages.pop(index)
+    await database.db.agent_sessions.update_one(
+        {"project_name": project_name},
+        {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
+    )
+    return {"status": "success", "remaining": len(messages)}
+
+@router.delete("/{project_name}/messages/{index}")
+async def delete_agent_message(project_name: str, index: int):
+    if database.db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    session = await database.db.agent_sessions.find_one({"project_name": project_name})
+    if not session or "messages" not in session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    messages = session.get("messages", [])
+    if index < 0 or index >= len(messages):
+        raise HTTPException(status_code=400, detail="Invalid message index")
+    
+    messages.pop(index)
+    await database.db.agent_sessions.update_one(
+        {"project_name": project_name},
+        {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
+    )
+    return {"status": "success", "remaining": len(messages)}

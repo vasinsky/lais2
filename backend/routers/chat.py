@@ -369,3 +369,23 @@ async def chat_stream(payload: ChatPayload):
                 )
 
     return EventSourceResponse(event_generator(), headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+@router.delete("/messages/{index}")
+async def delete_chat_message(index: int):
+    if database.db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    thread = await database.db.chat_threads.find_one({"thread_id": "global_chat"})
+    if not thread or "messages" not in thread:
+        raise HTTPException(status_code=404, detail="Messages not found")
+    
+    messages = thread.get("messages", [])
+    if index < 0 or index >= len(messages):
+        raise HTTPException(status_code=400, detail="Invalid message index")
+    
+    messages.pop(index)
+    await database.db.chat_threads.update_one(
+        {"thread_id": "global_chat"},
+        {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
+    )
+    return {"status": "success", "remaining": len(messages)}
