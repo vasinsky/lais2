@@ -30,6 +30,7 @@ services:
       - studio_workspace:/app/workspace
     depends_on:
       - mongo
+    command: /app/entrypoint.sh  
 
   frontend:
     build: ./frontend
@@ -42,6 +43,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    command: /app/entrypoint.sh  
 
 volumes:
   mongo_data:

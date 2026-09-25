@@ -112,11 +112,11 @@ export default function Header({
         <button 
           onClick={onOpenMemory}
           className="theme-toggle-btn"
-          title="Global Memory & System Rules"
+          title="System prompts & Rules"
           style={{ gap: '6px', color: rulesCount > 0 ? 'var(--btn-primary)' : 'var(--text-muted)' }}
         >
           <BrainCircuit size={14} color={rulesCount > 0 ? "var(--btn-primary)" : "currentColor"} />
-          <span style={{ fontWeight: 600 }}>Memory ({rulesCount})</span>
+          <span style={{ fontWeight: 600 }}>System prompts ({rulesCount})</span>
         </button>
 
         <button 

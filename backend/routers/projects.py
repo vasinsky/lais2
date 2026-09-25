@@ -332,11 +332,40 @@ def scan_dir(base_path: str, current_path: str) -> List[dict]:
     return nodes
 
 @router.get("/{project_name}/tree")
-def get_file_tree(project_name: str):
+async def get_project_tree(project_name: str, subpath: str = ""):
     proj_path = os.path.join(WORKSPACE_DIR, project_name)
     if not os.path.exists(proj_path):
         raise HTTPException(status_code=404, detail="Project not found")
-    return scan_dir(proj_path, proj_path)
+
+    target_dir = os.path.join(proj_path, subpath.strip("/").strip("\\")) if subpath else proj_path
+    if not os.path.exists(target_dir):
+        return []
+
+    items = []
+    try:
+        for entry in sorted(os.scandir(target_dir), key=lambda e: (not e.is_dir(), e.name.lower())):
+            if entry.name.startswith("."):
+                continue
+            rel_path = os.path.relpath(entry.path, proj_path).replace("\\", "/")
+            if entry.is_dir():
+                items.append({
+                    "name": entry.name,
+                    "path": rel_path,
+                    "type": "directory",
+                    "file_type": "other"
+                })
+            else:
+                ext = entry.name.split(".")[-1].lower() if "." in entry.name else ""
+                file_type = "image" if ext in ["png", "jpg", "jpeg", "webp", "gif", "svg"] else "code"
+                items.append({
+                    "name": entry.name,
+                    "path": rel_path,
+                    "type": "file",
+                    "file_type": file_type
+                })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return items
 
 @router.post("/{project_name}/create-item")
 def create_file_or_dir(project_name: str, item: CreateItem):
