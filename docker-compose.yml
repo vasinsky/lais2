@@ -26,6 +26,8 @@ services:
       - ALL_PROXY=socks5://host.docker.internal:10808
       - NO_PROXY=127.0.0.1,localhost,host.docker.internal,mongo
       - PROJECTS_ROOT_DIR=/app/projects
+      - COMFYUI_CHECKPOINTS_DIR=/app/comfy_checkpoints
+      - COMFYUI_DEFAULT_CHECKPOINT=${COMFYUI_DEFAULT_CHECKPOINT:-Realistic_Vision_V6.0_NV_B1_fp16.safetensors}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

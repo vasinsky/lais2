@@ -1,3 +1,4 @@
+import shutil
 from fastapi.responses import FileResponse
 import os
 import sys
@@ -231,3 +232,87 @@ async def clear_file_history(name: str, path: str = Query(...)):
     if hist_key in _file_history_store:
         _file_history_store[hist_key] = []
     return {"status": "ok"}
+
+class CreateDirectoryPayload(BaseModel):
+    path: str
+
+class MoveItemPayload(BaseModel):
+    source: str
+    destination: str
+
+@router.post("/{name}/directory")
+async def create_project_directory(name: str, payload: CreateDirectoryPayload):
+    base_dir = get_base_dir()
+    proj_root = os.path.realpath(os.path.join(base_dir, name))
+    target_dir = os.path.realpath(os.path.join(proj_root, payload.path.lstrip("/")))
+    
+    if not target_dir.startswith(proj_root):
+        raise HTTPException(status_code=400, detail="Invalid path traversal")
+    
+    os.makedirs(target_dir, exist_ok=True)
+    return {"status": "success", "path": payload.path}
+
+@router.delete("/{name}/file")
+async def delete_project_file(name: str, path: str = Query(...)):
+    base_dir = get_base_dir()
+    proj_root = os.path.realpath(os.path.join(base_dir, name))
+    target_path = os.path.realpath(os.path.join(proj_root, path.lstrip("/")))
+    
+    if not target_path.startswith(proj_root):
+        raise HTTPException(status_code=400, detail="Invalid path traversal")
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="File or folder not found")
+        
+    try:
+        if os.path.isdir(target_path):
+            shutil.rmtree(target_path)
+        else:
+            os.remove(target_path)
+        return {"status": "success", "deleted": path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{name}/move")
+async def move_project_file(name: str, payload: MoveItemPayload):
+    base_dir = get_base_dir()
+    proj_root = os.path.realpath(os.path.join(base_dir, name))
+    src_path = os.path.realpath(os.path.join(proj_root, payload.source.lstrip("/")))
+    
+    raw_dest = payload.destination.strip().lstrip("/")
+    dest_path = os.path.realpath(os.path.join(proj_root, raw_dest))
+    
+    if not src_path.startswith(proj_root) or not dest_path.startswith(proj_root):
+        raise HTTPException(status_code=400, detail="Invalid path traversal")
+    if not os.path.exists(src_path):
+        raise HTTPException(status_code=404, detail="Source not found")
+        
+    if os.path.isdir(dest_path):
+        final_dest = os.path.join(dest_path, os.path.basename(src_path))
+    else:
+        final_dest = dest_path
+
+    os.makedirs(os.path.dirname(final_dest), exist_ok=True)
+    shutil.move(src_path, final_dest)
+    
+    new_rel_path = os.path.relpath(final_dest, proj_root)
+    return {"status": "success", "new_path": new_rel_path}
+
+@router.delete("/{name}")
+async def delete_project(name: str):
+    base_dir = get_base_dir()
+    proj_root = os.path.realpath(os.path.join(base_dir, name))
+    
+    if not proj_root.startswith(base_dir) or proj_root == base_dir:
+        raise HTTPException(status_code=400, detail="Invalid project name")
+    if not os.path.exists(proj_root):
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    try:
+        shutil.rmtree(proj_root)
+        # Очищаем историю файлов удаленного проекта
+        keys_to_del = [k for k in _file_history_store if k.startswith(f"{name}:")]
+        for k in keys_to_del:
+            _file_history_store.pop(k, None)
+        return {"status": "success", "deleted": name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

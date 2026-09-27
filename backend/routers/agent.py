@@ -242,7 +242,7 @@ async def execute_agent_task(task: AgentTask):
             generated_image_names = []
             if img_intent:
                 yield {"data": json.dumps({"message": {"content": "🎨 Генерирую изображение через ComfyUI...\n"}})}
-                ckpt = task.comfy_checkpoint or "Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
+                ckpt = task.comfy_checkpoint or os.getenv("COMFYUI_DEFAULT_CHECKPOINT", "Realistic_Vision_V6.0_NV_B1_fp16.safetensors")
                 eng_desc = await translate_text_to_english(img_intent, client)
                 custom_subpath = extract_custom_image_path(task.prompt)
                 ts = int(datetime.datetime.utcnow().timestamp())

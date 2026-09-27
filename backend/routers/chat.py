@@ -211,7 +211,7 @@ async def chat_stream(payload: ChatPayload):
     target_model = payload.model or DEFAULT_CODER_MODEL
     has_images = any(m.images and len(m.images) > 0 for m in payload.messages)
     last_user_msg = payload.messages[-1]
-    checkpoint = payload.comfy_checkpoint or "Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
+    checkpoint = payload.comfy_checkpoint or os.getenv("COMFYUI_DEFAULT_CHECKPOINT", "Realistic_Vision_V6.0_NV_B1_fp16.safetensors")
     print(f"DEBUG: last_msg content={repr(last_user_msg.content)}, images_count={len(last_user_msg.images or [])}, has_images={has_images}")
 
     # --- 1. ОБРАБОТКА ГЕНЕРАЦИИ КАРТИНКИ ЧЕРЕЗ COMFYUI ---
