@@ -221,6 +221,30 @@ export default function RightPanel({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf("image") !== -1 || item.kind === "file") {
+        const file = item.getAsFile();
+        if (file && file.type.startsWith("image/")) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const base64 = (ev.target?.result as string)?.split(",")[1];
+            if (base64) {
+              setSelectedImages(prev => [...prev, base64]);
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+
   const renderMessageContent = (content: string, msgIdx: number) => {
     const codeBlockRegex = /```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```/g;
     const elements: React.ReactNode[] = [];
@@ -333,6 +357,7 @@ export default function RightPanel({
     }
 
     const currentImages = [...selectedImages];
+    const effectiveModel = currentImages.length > 0 ? "minicpm-v:latest" : selectedOllama;
     const userMsg: ChatMessage = {
       role: 'user',
       content: prompt,
@@ -355,7 +380,7 @@ export default function RightPanel({
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            model: selectedOllama,
+            model: effectiveModel,
             comfy_checkpoint: selectedComfy,
             messages: [...messages, userMsg],
             stream: true
@@ -465,7 +490,7 @@ export default function RightPanel({
                     setMessages(prev => [...prev, {
                       role: 'assistant',
                       content: assistantReply,
-                      modelUsed: selectedOllama
+                      modelUsed: effectiveModel
                     }]);
                     isStarted = true;
                   } else {
@@ -499,7 +524,7 @@ export default function RightPanel({
           body: JSON.stringify({
             project_name: activeProject,
             prompt: prompt,
-            model: selectedOllama,
+            model: effectiveModel,
             images: currentImages.length > 0 ? currentImages : undefined,
             active_file_path: activeFilePath || undefined,
             active_file_content: activeFileContent || undefined
@@ -553,7 +578,7 @@ export default function RightPanel({
                     setMessages(prev => [...prev, {
                       role: 'assistant',
                       content: assistantReply,
-                      modelUsed: selectedOllama
+                      modelUsed: effectiveModel
                     }]);
                     isStarted = true;
                   } else {
@@ -944,6 +969,7 @@ export default function RightPanel({
         <input 
           value={inputVal}
           onChange={e => setInputVal(e.target.value)}
+          onPaste={handlePaste}
           placeholder={isLoading ? "Generating image... Please wait" : (mode === 'chat' ? "Ask something or: создай картинку киберпанк город..." : "Describe task for project...")}
           className="studio-input"
           style={{ 

@@ -86,6 +86,14 @@ Open `http://localhost:3000` in your browser.
 
 ---
 
+### Image Processing & Multimodal Chat Workflow
+The studio features a hybrid multimodal pipeline separating visual technical analysis from image synthesis:
+- **Visual Analysis (`minicpm-v`):** When attaching images/screenshots with questions (e.g., *"what is in this picture?"*, *"analyze UI layout"*), `minicpm-v` processes sanitized Base64 data and delivers a structured Russian response detailing UI components, layout, and color schemes.
+- **Text-to-Image Generation (ComfyUI + `dolphin-llama3`):** Prompts like *"draw a cat"* or *"create an image of a cyberpunk city"* route to ComfyUI. Multilingual and Russian prompts are enriched and translated by `dolphin-llama3` into high-quality, comma-separated English Stable Diffusion tags.
+- **Image-to-Image / Style Recreation:** When attaching an image and asking to *"create a similar image"*, `minicpm-v` extracts the composition and styling directly into clean English SD tags, feeding ComfyUI (`Realistic_Vision`) to reproduce the design without conversational leaks.
+
+---
+
 ## Русский
 
 > ### ⚠️ ВНИМАНИЕ: ПРОЕКТ НАХОДИТСЯ В СТАДИИ РАЗРАБОТКИ
@@ -158,3 +166,9 @@ MONGO_URI=mongodb://mongo:27017/local_ai_studio
 docker compose up -d
 ```
 Интерфейс доступен по адресу `http://localhost:3000`.
+
+### Работа с изображениями и мультимодальный чат
+В студии реализован гибридный мультимодальный пайплайн, разделяющий визуальный анализ и синтез изображений:
+- **Визуальный анализ (`minicpm-v`):** При прикреплении картинок или скриншотов с вопросами (*«что на картинке?»*, *«разбери UI макет»*) подключается `minicpm-v`. Бэкенд очищает Base64 от data-URI префиксов и возвращает подробный технический разбор элементов интерфейса, текста и палитры на русском языке.
+- **Генерация изображений с нуля (Text-to-Image через ComfyUI + `dolphin-llama3`):** Команды вроде *«нарисуй кота»* или *«создай изображение киберпанк города»* маршрутизируются в ComfyUI. Запрос пользователя переводится и обогащается моделью `dolphin-llama3` в детализированный набор английских тегов для Stable Diffusion.
+- **Воссоздание стиля и макетов (Image Recreation):** Если прикрепить изображение с просьбой *«создай такую же картинку»*, `minicpm-v` считывает композицию, структуру и тему, формируя чистый английский промпт для ComfyUI (чекпоинт `Realistic_Vision`) для генерации похожего дизайна.

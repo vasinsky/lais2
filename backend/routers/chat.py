@@ -96,16 +96,25 @@ def parse_project_creation_intent(text: str):
 
 def parse_image_generation_intent(text: str) -> Optional[str]:
     raw = text.strip()
+    # Вопросы и аналитические запросы никогда не отправляем в ComfyUI
+    if re.search(r"\b(что|как|опиши|поясни|расскажи|почему|разбери|посмотри|где|what|describe|explain)\b", raw, re.IGNORECASE):
+        return None
+
     patterns = [
-        r"^(?:создай|сделай|сгенерируй|нарисуй)\s+(?:мне\s+)?(?:картинку|изображение|арт|рисунок|фото)\s*(?:про|с|на\s+тему|:)?\s*(.+)$",
-        r"^(?:generate|create|draw)\s+(?:an?\s+)?(?:image|picture|photo|art)\s*(?:of|about|:)?\s*(.+)$"
+        # создай/сделай/сгенерируй [мне] [такую же] картинку/арт/фото [про ...]
+        r"^(?:создай|сделай|сгенерируй)\s+(?:мне\s+)?(?:такую\s+же\s+|похожую\s+)?(?:картинку|изображение|арт|рисунок|фото)(?:\s*(?:про|с|на\s+тему|:)?\s*(.*))?$",
+        # нарисуй [мне] [картинку ...] ИЛИ нарисуй [мне] <объект>
+        r"^нарисуй\s+(?:мне\s+)?(?:(?:такую\s+же\s+|похожую\s+)?(?:картинку|изображение|арт|рисунок|фото)\s*(?:про|с|на\s+тему|:)?\s*)?(.*)$",
+        # generate/create an image of ...
+        r"^(?:generate|create)\s+(?:an?\s+)?(?:similar\s+)?(?:image|picture|photo|art)(?:\s*(?:of|about|:)?\s*(.*))?$",
+        # draw [an image of] ...
+        r"^draw\s+(?:(?:an?\s+)?(?:similar\s+)?(?:image|picture|photo|art)\s*(?:of|about|:)?\s*)?(.*)$"
     ]
     for pat in patterns:
-        m = re.search(pat, raw, re.IGNORECASE)
+        m = re.match(pat, raw, re.IGNORECASE)
         if m:
-            desc = m.group(1).strip()
-            if desc:
-                return desc
+            desc = m.group(1).strip() if (m.lastindex and m.group(1)) else raw
+            return desc or raw
     return None
 
 async def enhance_prompt_for_sd(user_desc: str, client: httpx.AsyncClient) -> str:
@@ -144,28 +153,42 @@ async def translate_text_to_english(text: str, client: httpx.AsyncClient) -> str
         }, timeout=40.0)
         if res.status_code == 200:
             return res.json().get("response", "").strip() or text
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[VISION ERROR] Failed to run {VISION_MODEL}: {repr(e)}")
     return text
 
 async def analyze_vision_to_english(text: str, images: List[str], client: httpx.AsyncClient) -> str:
+    # Очищаем base64 от префиксов data:image/...;base64,
+    clean_images = []
+    for img in images:
+        if "," in img:
+            clean_images.append(img.split(",", 1)[1])
+        else:
+            clean_images.append(img)
+
     prompt = (
-        f"Analyze this image in detail for software development context. "
-        f"User question: {text}\n"
-        "Provide a comprehensive technical description of the image content and translate the user request into English. "
-        "Output ONLY the English technical description and query:"
+        f"Ты эксперт визуального анализа. Пользователь прикрепил изображение и задал вопрос: \"{text}\".\n"
+        "Проведи подробный технический анализ изображения: разметка, UI компоненты, цветовая гамма, текст, структура или ошибки.\n"
+        "ОБЯЗАТЕЛЬНОЕ ПРАВИЛО: Весь твой ответ, анализ и пояснения должны быть СТРОГО НА РУССКОМ ЯЗЫКЕ.\n"
+        "Ответ:"
     )
     try:
+        print(f"[VISION] Sending {len(clean_images)} image(s) to {VISION_MODEL}...")
         res = await client.post(f"{OLLAMA_URL}/api/generate", json={
             "model": VISION_MODEL,
             "prompt": prompt,
-            "images": images,
+            "images": clean_images,
             "stream": False
-        }, timeout=60.0)
+        }, timeout=90.0)
+        print(f"[VISION] Status: {res.status_code}")
         if res.status_code == 200:
-            return res.json().get("response", "").strip() or text
-    except Exception:
-        pass
+            resp_text = res.json().get("response", "").strip()
+            print(f"[VISION] Response length: {len(resp_text)}")
+            return resp_text or text
+        else:
+            print(f"[VISION ERROR] Bad status: {res.text}")
+    except Exception as e:
+        print(f"[VISION EXCEPTION] {e}")
     return text
 
 @router.get("/history")
@@ -187,9 +210,11 @@ async def chat_stream(payload: ChatPayload):
     has_images = any(m.images and len(m.images) > 0 for m in payload.messages)
     last_user_msg = payload.messages[-1]
     checkpoint = payload.comfy_checkpoint or "Realistic_Vision_V6.0_NV_B1_fp16.safetensors"
+    print(f"DEBUG: last_msg content={repr(last_user_msg.content)}, images_count={len(last_user_msg.images or [])}, has_images={has_images}")
 
     # --- 1. ОБРАБОТКА ГЕНЕРАЦИИ КАРТИНКИ ЧЕРЕЗ COMFYUI ---
     img_desc = parse_image_generation_intent(last_user_msg.content)
+    is_image_recreation = bool(img_desc and has_images)
     if img_desc:
         now_iso = datetime.datetime.utcnow().isoformat()
         if database.db is not None:
@@ -202,9 +227,19 @@ async def chat_stream(payload: ChatPayload):
         async def image_event_generator():
             yield {"data": json.dumps({"type": "meta", "model": f"ComfyUI ({checkpoint})", "is_image_task": True})}
 
-            # Перевод и расширение промпта через dolphin-llama3
-            async with httpx.AsyncClient(timeout=35.0, trust_env=False) as client:
-                sd_prompt = await enhance_prompt_for_sd(img_desc, client)
+            # Извлечение/перевод промпта: через minicpm-v если есть картинка, иначе через dolphin-llama3
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+                if has_images and last_user_msg.images:
+                    clean_imgs = [img.split(",", 1)[1] if "," in img else img for img in last_user_msg.images]
+                    vision_res = await client.post(f"{OLLAMA_URL}/api/generate", json={
+                        "model": VISION_MODEL,
+                        "prompt": "Analyze this image and generate ONLY a concise, comma-separated Stable Diffusion prompt in English describing visual subject, UI layout, webpage theme, color palette, flat style. Output ONLY tags, no prose, no Russian.",
+                        "images": clean_imgs,
+                        "stream": False
+                    }, timeout=60.0)
+                    sd_prompt = vision_res.json().get("response", "").strip() if vision_res.status_code == 200 else img_desc
+                else:
+                    sd_prompt = await enhance_prompt_for_sd(img_desc, client)
 
             yield {"data": json.dumps({
                 "type": "image_prompt_ready",
