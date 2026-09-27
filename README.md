@@ -23,6 +23,7 @@ Local AI Studio is a self-hosted workspace combining local Large Language Models
 - **Agentic Code Generation & Editing:** Autonomous LLM-driven file manipulation, project tree navigation, and code history revision tracking with snapshot recovery.
 - **Integrated Image Pipeline:** Prompt-to-image workflow directly within the workspace with built-in asset storage and base64 hover previews.
 - **Configurable Workspace Paths:** Dynamic host-to-container volume mapping for workspace projects.
+- **Context Isolation & Overflow Protection:** Dual-layer memory architecture: MongoDB preserves 100% of historical messages and Base64 media, while the inference context window dynamically suppresses historical image payloads and uses a 16,384-token sliding window (`num_ctx: 16384`) to prevent context exhaustion.
 
 ---
 
@@ -76,6 +77,11 @@ MONGO_PORT=27017
 OLLAMA_URL=http://host.docker.internal:11434
 COMFY_URL=http://host.docker.internal:8188
 MONGO_URI=mongodb://mongo:27017/local_ai_studio
+
+# Configurable LLM & Vision Models
+DEFAULT_CODER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
+TRANSLATOR_MODEL=dolphin-llama3:latest
+VISION_MODEL=minicpm-v:latest
 ```
 
 3. **Run via Docker Compose:**
@@ -107,6 +113,7 @@ Local AI Studio — это локальная среда разработки и
 - **Агентное редактирование кода:** Чат-ассистент, способный анализировать контекст файлов, вносить изменения и фиксировать снимки истории (Revision History) с возможностью быстрого отката.
 - **Генерация визуальных ассетов:** Встроенный интерфейс генерации картинок через ComfyUI с автоматическим сохранением графики в выбранную папку активного проекта.
 - **Гибкое управление путями:** Путь к локальным проектам меняется строго через `.env` без правок в коде приложения.
+- **Двухуровневая защита контекста:** Разделение хранилища и инференса. MongoDB хранит 100% истории переписки и вложений, тогда как в контекстное окно Ollama передается динамическое скользящее окно с изоляцией тяжелых Base64-строк и расширенным лимитом токенов (`num_ctx: 16384`), предотвращая сбои переполнения памяти.
 
 ---
 
@@ -159,6 +166,11 @@ MONGO_PORT=27017
 OLLAMA_URL=http://host.docker.internal:11434
 COMFY_URL=http://host.docker.internal:8188
 MONGO_URI=mongodb://mongo:27017/local_ai_studio
+
+# Настраиваемые модели (LLM, Vision, переводчик)
+DEFAULT_CODER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
+TRANSLATOR_MODEL=dolphin-llama3:latest
+VISION_MODEL=minicpm-v:latest
 ```
 
 3. **Запуск контейнеров:**
