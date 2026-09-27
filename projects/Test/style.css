@@ -1,6 +1,3 @@
-Sure! Here's an example of CSS code for a simple one-page website about cats:
-
-```css
 /* created from local ai studio */
 
 body {
@@ -29,6 +26,18 @@ p {
   line-height: 1.6;
 }
 
+.kitten-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 20px;
+}
+
 footer {
   background-color: #333;
   color: #fff;
@@ -38,6 +47,3 @@ footer {
   bottom: 0;
   width: 100%;
 }
-```
-
-This CSS code will style your HTML file to make it look professional and easy to read.

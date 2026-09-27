@@ -15,8 +15,10 @@ router = APIRouter()
 WORKSPACE_DIR = os.getenv("PROJECTS_ROOT_DIR", "/app/projects")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 
-TRANSLATOR_MODEL = "dolphin-llama3:latest"
-VISION_MODEL = "minicpm-v:latest"
+import os
+
+TRANSLATOR_MODEL = os.getenv("TRANSLATOR_MODEL", "dolphin-llama3:latest")
+VISION_MODEL = os.getenv("VISION_MODEL", "minicpm-v:latest")
 DEFAULT_CODER_MODEL = "qwen2.5-coder:7b-instruct-q4_K_M"
 
 class ImageProgressInfo(BaseModel):
@@ -261,6 +263,24 @@ async def chat_stream(payload: ChatPayload):
                     }
                 elif ev.get("type") == "image_complete":
                     final_img_url = ev.get("image_url")
+                    raw_filename = ev.get("filename")
+                    subfolder = ev.get("subfolder", "")
+                    
+                    # Скачиваем и сохраняем файл в папку generated_images
+                    try:
+                        save_dir = os.getenv("GENERATED_IMAGES_DIR", "/app/generated_images")
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_path = os.path.join(save_dir, raw_filename)
+                        v_url = f"{COMFYUI_HTTP}/view?filename={raw_filename}"
+                        if subfolder:
+                            v_url += f"&subfolder={subfolder}"
+                        async with httpx.AsyncClient(timeout=30.0) as img_client:
+                            r = await img_client.get(v_url)
+                            if r.status_code == 200:
+                                with open(save_path, "wb") as f_out:
+                                    f_out.write(r.content)
+                    except Exception as err:
+                        print(f"Error saving chat generated image: {err}")
                 elif ev.get("type") == "image_error":
                     last_progress["status"] = ev.get("error", "Error")
 
@@ -366,10 +386,32 @@ async def chat_stream(payload: ChatPayload):
                 "while writing clean, production-ready code in standard formats."
             )
 
+            # Формирование безопасного контекста для инференса (БД остается нетронутой)
             processed_messages = [{"role": "system", "content": system_instruction}]
-            for m in payload.messages[:-1]:
-                processed_messages.append({"role": m.role, "content": m.content})
-            processed_messages.append({"role": "user", "content": english_user_prompt})
+            
+            history_msgs = payload.messages[:-1]
+            if len(history_msgs) > 12:
+                earlier_count = len(history_msgs) - 12
+                processed_messages.append({
+                    "role": "system",
+                    "content": f"[Контекст: в диалоге ранее было еще {earlier_count} сообщений, сохраненных в истории]"
+                })
+                history_msgs = history_msgs[-12:]
+
+            for m in history_msgs:
+                content_text = m.content or ""
+                if getattr(m, "images", None):
+                    content_text += "\n[Вложение: изображение сохранено в истории диалога]"
+                processed_messages.append({"role": m.role, "content": content_text})
+
+            # Текущее активное сообщение с чистым Base64 при наличии
+            current_msg = {"role": "user", "content": english_user_prompt}
+            if getattr(last_user_msg, "images", None):
+                current_msg["images"] = [
+                    img.split(",", 1)[1] if "," in img else img
+                    for img in last_user_msg.images
+                ]
+            processed_messages.append(current_msg)
 
             assistant_full_reply = ""
             req_body = {

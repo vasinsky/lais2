@@ -7,3 +7,15 @@ __pycache__/
 .DS_Store
 workspace/
 mongo-data/
+
+# Generated media and projects
+/generated_images/*
+!/generated_images/.gitkeep
+/projects/*
+!/projects/.gitkeep
+
+# Generated images & user projects
+/projects/*
+!/projects/.gitkeep
+/generated_images/*
+!/generated_images/.gitkeep

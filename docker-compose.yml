@@ -18,6 +18,9 @@ services:
       - MONGO_URI=${MONGO_URI}
       - COMFY_URL=${COMFY_URL}
       - OLLAMA_URL=${OLLAMA_URL}
+      - TRANSLATOR_MODEL=${TRANSLATOR_MODEL:-dolphin-llama3:latest}
+      - VISION_MODEL=${VISION_MODEL:-minicpm-v:latest}
+      - DEFAULT_CODER_MODEL=${DEFAULT_CODER_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}
       - HTTP_PROXY=socks5://host.docker.internal:10808
       - HTTPS_PROXY=socks5://host.docker.internal:10808
       - ALL_PROXY=socks5://host.docker.internal:10808
@@ -28,6 +31,7 @@ services:
     volumes:
       - ./backend:/app
       - ${PROJECTS_DIR:-./projects}:/app/projects
+      - ./generated_images:/app/generated_images
     depends_on:
       - mongo
     command: /app/entrypoint.sh

@@ -527,7 +527,8 @@ export default function RightPanel({
             model: effectiveModel,
             images: currentImages.length > 0 ? currentImages : undefined,
             active_file_path: activeFilePath || undefined,
-            active_file_content: activeFileContent || undefined
+            active_file_content: activeFileContent || undefined,
+            comfy_checkpoint: selectedComfy || undefined
           })
         });
 
@@ -564,29 +565,55 @@ export default function RightPanel({
                   isStreamingToFile = true;
                   currentStreamFile = data.file_path;
                   onLiveStreamToEditor(currentStreamFile, '', true);
+                } else if (data.type === 'image_progress') {
+                  setMessages(prev => {
+                    const next = [...prev];
+                    const last = next[next.length - 1];
+                    const pInfo = {
+                      step: data.step ?? 0,
+                      total: data.total ?? 20,
+                      percent: data.percent ?? 0,
+                      status: data.status || "Sampling..."
+                    };
+                    if (last && last.role === 'assistant') {
+                      last.image_progress = pInfo;
+                    } else {
+                      next.push({
+                        role: 'assistant',
+                        content: '🎨 Генерирую изображение через ComfyUI...',
+                        modelUsed: effectiveModel,
+                        image_progress: pInfo
+                      });
+                      isStarted = true;
+                    }
+                    return next;
+                  });
                 } else if (data.type === 'file_saved') {
                   onFileAutoSaved(data.file_path, data.revision);
+                  isStreamingToFile = false;
+                  currentStreamFile = "";
+                  onRefreshProjectTree?.();
                 } else if (data.message && data.message.content) {
                   const token = data.message.content;
-                  assistantReply += token;
 
                   if (isStreamingToFile) {
                     onLiveStreamToEditor(currentStreamFile, token, false);
-                  }
-
-                  if (!isStarted) {
-                    setMessages(prev => [...prev, {
-                      role: 'assistant',
-                      content: assistantReply,
-                      modelUsed: effectiveModel
-                    }]);
-                    isStarted = true;
                   } else {
-                    setMessages(prev => {
-                      const updated = [...prev];
-                      updated[updated.length - 1].content = assistantReply;
-                      return updated;
-                    });
+                    assistantReply += token;
+                    if (!isStarted) {
+                      setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: assistantReply,
+                        modelUsed: effectiveModel
+                      }]);
+                      isStarted = true;
+                    } else {
+                      setMessages(prev => {
+                        const updated = [...prev];
+                        updated[updated.length - 1].content = assistantReply;
+                        return updated;
+                      });
+                    }
                   }
                 }
               } catch (_) {}

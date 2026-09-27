@@ -63,11 +63,17 @@ export default function App() {
   };
 
   const handleLiveStreamToEditor = (targetPath: string, codeChunk: string, isStart: boolean) => {
-    if (!activeFile || activeFile.path !== targetPath) {
+    if (isStart) {
       setActiveFile({ path: targetPath, type: 'code' });
       setSelectedHistoryItem(null);
+      setActiveFileContent(codeChunk || "");
+      setTreeRefreshTrigger(t => t + 1);
+    } else {
+      if (!activeFile || activeFile.path !== targetPath) {
+        setActiveFile({ path: targetPath, type: 'code' });
+      }
+      setActiveFileContent(prev => prev + codeChunk);
     }
-    setActiveFileContent(prev => isStart ? codeChunk : (prev + codeChunk));
   };
 
   const handleInsertCodeToEditor = (codeSnippet: string) => {
