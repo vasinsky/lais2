@@ -279,7 +279,7 @@ export default function CenterEditor({
         ) : (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-panel)' }}>
             <img 
-              src={`/api/projects/${activeProject}/file?path=${encodeURIComponent(activeFile.path)}`} 
+              src={`${API_BASE_URL}/projects/${activeProject}/raw-file?path=${encodeURIComponent(activeFile.path)}`} 
               alt={activeFile.path}
               style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain', borderRadius: '4px', border: '1px solid var(--border-color)' }}
             />

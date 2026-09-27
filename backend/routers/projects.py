@@ -1,3 +1,4 @@
+from fastapi.responses import FileResponse
 import os
 import sys
 import datetime
@@ -129,6 +130,15 @@ async def get_project_tree(name: str, subpath: Optional[str] = None):
         raise HTTPException(status_code=404, detail="Subpath not found")
 
     return build_tree(target_dir, rel_path=subpath if subpath else "")
+
+
+@router.get("/{name}/raw-file")
+async def get_raw_file(name: str, path: str = Query(...)):
+    cur_ws = get_base_dir()
+    file_path = os.path.join(cur_ws, name, path)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path)
 
 @router.get("/{name}/file")
 async def get_file_content(name: str, path: str = Query(...)):
