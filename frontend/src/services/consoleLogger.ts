@@ -21,22 +21,23 @@ class ConsoleLogger {
     const timestamp = new Date().toLocaleTimeString();
     const proj = entry.project || 'general';
 
-    if (!this.logs[proj]) {
-      this.logs[proj] = [];
-    }
-
-    this.logs[proj].push({
-      ...entry,
-      id,
-      timestamp
-    });
+    const currentLogs = this.logs[proj] || [];
+    // Иммутабельное добавление — создаем НОВЫЙ массив, чтобы React видел изменение ссылки
+    this.logs[proj] = [
+      ...currentLogs,
+      {
+        ...entry,
+        id,
+        timestamp
+      }
+    ];
 
     this.notify();
   }
 
   getLogs(project: string | null): LogEntry[] {
     const key = project || 'general';
-    return this.logs[key] || [];
+    return [...(this.logs[key] || [])];
   }
 
   clearLogs(project: string | null) {

@@ -34,9 +34,9 @@ export default function BottomTerminal({
 
   // Подписка на per-project логи
   useEffect(() => {
-    setLogs(consoleLogger.getLogs(activeProject));
+    setLogs([...consoleLogger.getLogs(activeProject)]);
     const unsubscribe = consoleLogger.subscribe(() => {
-      setLogs(consoleLogger.getLogs(activeProject));
+      setLogs([...consoleLogger.getLogs(activeProject)]);
     });
     return unsubscribe;
   }, [activeProject]);
