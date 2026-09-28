@@ -5,12 +5,24 @@ import RightPanel from '../components/RightPanel/RightPanel';
 import { ToastProvider } from '../components/Toast';
 
 // Мокаем глобальный fetch
-global.fetch = vi.fn(() =>
-  Promise.resolve({
+global.fetch = vi.fn((url: string) => {
+  if (typeof url === 'string' && url.includes('/stats')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ msg_count: 1, size_kb: 1.25, size_bytes: 1280 }),
+    });
+  }
+  if (typeof url === 'string' && url.includes('/model-info')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ model: 'qwen2.5-coder', context_length: 32768 }),
+    });
+  }
+  return Promise.resolve({
     ok: true,
     json: () => Promise.resolve([]),
-  })
-) as any;
+  });
+}) as any;
 
 describe('RightPanel Component', () => {
   const defaultProps = {
@@ -36,20 +48,24 @@ describe('RightPanel Component', () => {
   it('renders code snippet with Insert button and calls onInsertCodeToEditor', async () => {
     const handleInsert = vi.fn();
 
-    // Мокаем возвращение истории с блоком кода
-    (global.fetch as any).mockImplementationOnce(() =>
-      Promise.resolve({
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/stats')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ msg_count: 1, size_kb: 1.25 }) });
+      }
+      if (typeof url === 'string' && url.includes('/model-info')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ context_length: 32768 }) });
+      }
+      return Promise.resolve({
         ok: true,
-        json: () =>
-          Promise.resolve([
-            {
-              role: 'assistant',
-              content: '```javascript\nconsole.log("hello");\n```',
-              modelUsed: 'qwen2.5-coder',
-            },
-          ]),
-      })
-    );
+        json: () => Promise.resolve([
+          {
+            role: 'assistant',
+            content: '```javascript\nconsole.log("hello");\n```',
+            modelUsed: 'qwen2.5-coder',
+          },
+        ]),
+      });
+    });
 
     render(
       <ToastProvider>
@@ -65,21 +81,26 @@ describe('RightPanel Component', () => {
   });
 
   it('renders comfy execution progress and image card', async () => {
-    (global.fetch as any).mockImplementationOnce(() =>
-      Promise.resolve({
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/stats')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ msg_count: 1, size_kb: 1.25 }) });
+      }
+      if (typeof url === 'string' && url.includes('/model-info')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ context_length: 32768 }) });
+      }
+      return Promise.resolve({
         ok: true,
-        json: () =>
-          Promise.resolve([
-            {
-              role: 'assistant',
-              content: 'Image generation completed.',
-              generated_image: '/api/chat/image/view?filename=test.png',
-              image_prompt: 'cyberpunk street in rain',
-              image_progress: { step: 20, total: 20, percent: 100, status: 'Completed' },
-            },
-          ]),
-      })
-    );
+        json: () => Promise.resolve([
+          {
+            role: 'assistant',
+            content: 'Image generation completed.',
+            generated_image: '/api/chat/image/view?filename=test.png',
+            image_prompt: 'cyberpunk street in rain',
+            image_progress: { step: 20, total: 20, percent: 100, status: 'Completed' },
+          },
+        ]),
+      });
+    });
 
     render(
       <ToastProvider>
@@ -94,18 +115,23 @@ describe('RightPanel Component', () => {
   });
 
   it('shows message actions (Copy, Delete) on mouse hover', async () => {
-    (global.fetch as any).mockImplementationOnce(() =>
-      Promise.resolve({
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/stats')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ msg_count: 1, size_kb: 1.25 }) });
+      }
+      if (typeof url === 'string' && url.includes('/model-info')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ context_length: 32768 }) });
+      }
+      return Promise.resolve({
         ok: true,
-        json: () =>
-          Promise.resolve([
-            {
-              role: 'user',
-              content: 'Hello World Test Message',
-            },
-          ]),
-      })
-    );
+        json: () => Promise.resolve([
+          {
+            role: 'user',
+            content: 'Hello World Test Message',
+          },
+        ]),
+      });
+    });
 
     render(
       <ToastProvider>

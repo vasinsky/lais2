@@ -1,3 +1,4 @@
+import bson
 import os
 import re
 import json
@@ -466,3 +467,19 @@ async def delete_chat_message(index: int):
         {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
     )
     return {"status": "success", "remaining": len(messages)}
+
+@router.get("/stats")
+async def get_global_chat_stats():
+    if database.db is None:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    thread = await database.db.chat_threads.find_one({"thread_id": "global_chat"})
+    if not thread:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    
+    raw_bytes = len(bson.BSON.encode(thread))
+    msgs = thread.get("messages", [])
+    return {
+        "msg_count": len(msgs),
+        "size_bytes": raw_bytes,
+        "size_kb": round(raw_bytes / 1024, 2)
+    }

@@ -1,3 +1,4 @@
+import bson
 import os
 import re
 import json
@@ -456,3 +457,19 @@ async def delete_agent_message(project_name: str, index: int):
         {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
     )
     return {"status": "success", "remaining": len(messages)}
+
+@router.get("/{project_name}/stats")
+async def get_agent_stats(project_name: str):
+    if database.db is None:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    session = await database.db.agent_sessions.find_one({"project_name": project_name})
+    if not session:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    
+    raw_bytes = len(bson.BSON.encode(session))
+    msgs = session.get("messages", [])
+    return {
+        "msg_count": len(msgs),
+        "size_bytes": raw_bytes,
+        "size_kb": round(raw_bytes / 1024, 2)
+    }

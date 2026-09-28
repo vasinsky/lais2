@@ -58,6 +58,7 @@ export default function RightPanel({
   onRefreshProjectTree
 }: Props) {
   const { showToast } = useToast();
+
   const [inputVal, setInputVal] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -65,6 +66,9 @@ export default function RightPanel({
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<string | null>(null);
   const [hoveredMsgIdx, setHoveredMsgIdx] = useState<number | null>(null);
+
+  const [sessionStats, setSessionStats] = useState<{ msgCount: number; sizeKb: number }>({ msgCount: 0, sizeKb: 0 });
+  const [modelContext, setModelContext] = useState<number | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +81,47 @@ export default function RightPanel({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  const fetchSessionStats = async () => {
+    try {
+      const url = mode === 'chat' 
+        ? `${API_BASE_URL}/chat/stats`
+        : (activeProject ? `${API_BASE_URL}/agent/${encodeURIComponent(activeProject)}/stats` : null);
+      if (!url) {
+        setSessionStats({ msgCount: 0, sizeKb: 0 });
+        return;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionStats({ msgCount: data.msg_count || 0, sizeKb: data.size_kb || 0 });
+      }
+    } catch {
+      // fallback
+    }
+  };
+
+  const fetchModelContext = async (modelName: string) => {
+    if (!modelName) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/system/model-info?model=${encodeURIComponent(modelName)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setModelContext(data.context_length || null);
+      }
+    } catch {
+      setModelContext(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchSessionStats();
+  }, [mode, activeProject, messages.length]);
+
+  useEffect(() => {
+    const targetModel = selectedOllama || 'qwen2.5-coder:7b-instruct-q4_K_M';
+    fetchModelContext(targetModel);
+  }, [selectedOllama]);
 
   const loadHistory = () => {
     if (mode === 'chat') {
@@ -106,6 +151,7 @@ export default function RightPanel({
         .then(res => {
           if (res.ok) {
             setMessages([]);
+            setSessionStats({ msgCount: 0, sizeKb: 0 });
             showToast("Global Chat history cleared", "info");
           }
         });
@@ -114,568 +160,384 @@ export default function RightPanel({
         .then(res => {
           if (res.ok) {
             setMessages([]);
+            setSessionStats({ msgCount: 0, sizeKb: 0 });
             showToast(`Agent history for "${activeProject}" cleared`, "info");
           }
         });
     }
   };
 
-  const handleDeleteMessage = async (idx: number) => {
-    try {
-      const url = mode === 'chat' 
-        ? `/api/chat/messages/${idx}`
-        : `/api/agent/${encodeURIComponent(activeProject || '')}/messages/${idx}`;
-      
-      const res = await fetch(url, { method: 'DELETE' });
-      if (res.ok) {
-        setMessages(prev => prev.filter((_, i) => i !== idx));
-        showToast("Message deleted", "info");
-      }
-    } catch {
-      showToast("Failed to delete message", "error");
-    }
+  const handleDeleteMessage = (idxToDelete: number) => {
+    setMessages(prev => prev.filter((_, idx) => idx !== idxToDelete));
+    showToast("Message deleted from view", "info");
   };
 
-  const handleCopyText = (text: string) => {
-    navigator.clipboard.writeText(text);
-    showToast("Copied to clipboard", "success");
-  };
-
-  const handleCopyImage = async (imgUrl: string) => {
-    try {
-      const res = await fetch(imgUrl);
-      const blob = await res.blob();
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob })
-      ]);
-      showToast("Image copied to clipboard", "success");
-    } catch {
-      navigator.clipboard.writeText(imgUrl);
-      showToast("Image URL copied to clipboard", "info");
-    }
-  };
-
-  const handleSaveImageToProject = async (imageUrl: string) => {
-    if (!activeProject) {
-      showToast("Select a project first in the left tree", "error");
-      return;
-    }
-
-    let targetDirectory = "";
-    if (activeFilePath) {
-      const parts = activeFilePath.split('/');
-      if (parts.length > 1) {
-        targetDirectory = parts.slice(0, -1).join('/');
-      }
-    }
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(activeProject)}/save-image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_url: imageUrl,
-          target_dir: targetDirectory
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        showToast(`Image saved: ${data.file_path}`, "success");
-        if (onRefreshProjectTree) onRefreshProjectTree();
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        showToast(errData.detail || "Failed to save image", "error");
-      }
-    } catch {
-      showToast("Network error saving image", "error");
-    }
-  };
-
-  const handleCancelGeneration = async () => {
+  const handleStopExecution = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
-    try {
-      await fetch(`${API_BASE_URL}/chat/interrupt`, { method: 'POST' });
-    } catch (_) {}
-
+    fetch(`${API_BASE_URL}/chat/stop`, { method: 'POST' }).catch(() => {});
     setIsLoading(false);
-    showToast("Generation cancelled", "info");
+    showToast("Execution stopped", "info");
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
     Array.from(files).forEach(file => {
-      if (!file.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const base64 = (ev.target?.result as string)?.split(',')[1];
+        const base64 = ev.target?.result as string;
         if (base64) {
           setSelectedImages(prev => [...prev, base64]);
         }
       };
       reader.readAsDataURL(file);
     });
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.type.indexOf("image") !== -1 || item.kind === "file") {
-        const file = item.getAsFile();
-        if (file && file.type.startsWith("image/")) {
-          e.preventDefault();
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const base64 = (ev.target?.result as string)?.split(",")[1];
-            if (base64) {
-              setSelectedImages(prev => [...prev, base64]);
-            }
-          };
-          reader.readAsDataURL(file);
-        }
-      }
-    }
-  };
-
-
-  const renderMessageContent = (content: string, msgIdx: number) => {
-    const codeBlockRegex = /```([a-zA-Z0-9_\-+]*)\n([\s\S]*?)```/g;
-    const elements: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match;
-
-    while ((match = codeBlockRegex.exec(content)) !== null) {
-      const matchIndex = match.index;
-      if (matchIndex > lastIndex) {
-        elements.push(
-          <span key={`text-${lastIndex}`}>{content.substring(lastIndex, matchIndex)}</span>
-        );
-      }
-
-      const lang = match[1] || 'code';
-      const codeSnippet = match[2];
-      const blockKey = `${msgIdx}-${matchIndex}`;
-
-      elements.push(
-        <div 
-          key={`code-${blockKey}`}
-          style={{
-            margin: '8px 0',
-            borderRadius: '6px',
-            overflow: 'hidden',
-            border: '1px solid var(--border-color)',
-            background: 'var(--bg-panel-sub)'
-          }}
-        >
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '4px 8px',
-            background: 'var(--bg-panel)',
-            borderBottom: '1px solid var(--border-color)',
-            fontSize: '11px',
-            color: 'var(--text-muted)'
-          }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', textTransform: 'lowercase' }}>
-              <Code size={12} />
-              {lang}
-            </span>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(codeSnippet);
-                  setCopiedCodeIdx(blockKey);
-                  setTimeout(() => setCopiedCodeIdx(null), 2000);
-                  showToast("Code copied", "success");
-                }}
-                className="theme-toggle-btn"
-                style={{ padding: '2px 6px', fontSize: '10.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                title="Copy code to clipboard"
-              >
-                {copiedCodeIdx === blockKey ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
-                {copiedCodeIdx === blockKey ? "Copied" : "Copy"}
-              </button>
-
-              {onInsertCodeToEditor && activeFilePath && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onInsertCodeToEditor(codeSnippet);
-                    showToast(`Inserted code into ${activeFilePath}`, "success");
-                  }}
-                  className="theme-toggle-btn"
-                  style={{ padding: '2px 6px', fontSize: '10.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  title="Insert into active editor"
-                >
-                  <ArrowDownToLine size={11} color="var(--btn-primary)" />
-                  Insert
-                </button>
-              )}
-            </div>
-          </div>
-          <pre style={{
-            margin: 0,
-            padding: '8px 10px',
-            fontSize: '11.5px',
-            fontFamily: 'monospace',
-            overflowX: 'auto',
-            whiteSpace: 'pre-wrap',
-            background: 'var(--bg-card)'
-          }}>
-            <code>{codeSnippet}</code>
-          </pre>
-        </div>
-      );
-
-      lastIndex = codeBlockRegex.lastIndex;
-    }
-
-    if (lastIndex < content.length) {
-      elements.push(<span key={`text-${lastIndex}`}>{content.substring(lastIndex)}</span>);
-    }
-
-    return elements;
-  };
-
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const prompt = inputVal.trim();
-    if (!prompt || isLoading) return;
+  const handleSendMessage = async () => {
+    const trimmed = inputVal.trim();
+    if ((!trimmed && selectedImages.length === 0) || isLoading) return;
 
     if (mode === 'agent' && !activeProject) {
-      showToast("Please select or create a project first", "error");
+      showToast("Please select a project to use Project Agent", "warning");
       return;
     }
 
-    const currentImages = [...selectedImages];
-    const effectiveModel = currentImages.length > 0 ? "minicpm-v:latest" : selectedOllama;
     const userMsg: ChatMessage = {
       role: 'user',
-      content: prompt,
-      images: currentImages.length > 0 ? currentImages : undefined
+      content: trimmed,
+      images: selectedImages.length > 0 ? selectedImages : undefined
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInputVal('');
     setSelectedImages([]);
     setIsLoading(true);
-    setActiveModelUsed(null);
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    abortControllerRef.current = new AbortController();
 
-    if (mode === 'chat') {
-      try {
+    const assistantMsgPlaceholder: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      modelUsed: selectedOllama
+    };
+    setMessages(prev => [...prev, assistantMsgPlaceholder]);
+
+    try {
+      if (mode === 'chat') {
         const res = await fetch(`${API_BASE_URL}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
           body: JSON.stringify({
-            model: effectiveModel,
-            comfy_checkpoint: selectedComfy,
             messages: [...messages, userMsg],
-            stream: true
-          })
+            model: selectedOllama,
+            comfy_checkpoint: selectedComfy
+          }),
+          signal: abortControllerRef.current.signal
         });
 
-        if (!res.ok) throw new Error("Network error contacting backend");
+        if (!res.ok || !res.body) {
+          throw new Error('Failed to start chat completion');
+        }
 
-        const reader = res.body?.getReader();
+        const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let assistantReply = '';
-        let isStarted = false;
-        let isImageTask = false;
         let buffer = '';
 
-        while (reader) {
+        while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
+          const lines = buffer.split('\n');
           buffer = lines.pop() || '';
 
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('data:')) {
-              const jsonStr = trimmed.replace(/^data:\s*/, '');
-              if (!jsonStr) continue;
-
+            if (line.startsWith('data: ')) {
+              const rawData = line.slice(6).trim();
+              if (rawData === '[DONE]') break;
               try {
-                const data = JSON.parse(jsonStr);
-
-                if (data.type === 'meta') {
-                  setActiveModelUsed(data.model);
-                  if (data.is_image_task) {
-                    isImageTask = true;
-                    setMessages(prev => [...prev, {
-                      role: 'assistant',
-                      content: 'Translating prompt with dolphin-llama3...',
-                      modelUsed: data.model,
-                      image_progress: { step: 0, total: 20, percent: 0, status: 'Initializing...' }
-                    }]);
-                    isStarted = true;
-                  }
-                } else if (data.type === 'image_prompt_ready') {
+                const parsed = JSON.parse(rawData);
+                if (parsed.message?.content) {
                   setMessages(prev => {
                     const next = [...prev];
-                    const last = next[next.length - 1];
-                    if (last && last.role === 'assistant') {
-                      last.image_prompt = data.prompt;
-                      last.content = 'Prompt ready. Queued in ComfyUI...';
-                      if (last.image_progress) {
-                        last.image_progress.status = data.status || 'Queued...';
-                      }
-                    }
-                    return next;
-                  });
-                } else if (data.type === 'image_progress') {
-                  setMessages(prev => {
-                    const next = [...prev];
-                    const last = next[next.length - 1];
-                    if (last && last.role === 'assistant') {
-                      last.image_progress = {
-                        step: data.step,
-                        total: data.total,
-                        percent: data.percent,
-                        status: data.status
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        content: next[lastIdx].content + parsed.message.content
                       };
-                      last.content = data.status;
                     }
                     return next;
                   });
-                } else if (data.type === 'image_complete') {
+                } else if (parsed.type === 'image_progress') {
                   setMessages(prev => {
                     const next = [...prev];
-                    const last = next[next.length - 1];
-                    if (last && last.role === 'assistant') {
-                      last.generated_image = data.image_url;
-                      last.image_prompt = data.prompt;
-                      last.content = 'Image generation completed.';
-                      if (last.image_progress) {
-                        last.image_progress.percent = 100;
-                        last.image_progress.status = 'Completed';
-                      }
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        image_progress: parsed.data
+                      };
                     }
                     return next;
                   });
-                  showToast("Image successfully generated!", "success");
-                } else if (data.type === 'image_error') {
+                } else if (parsed.type === 'image_result') {
                   setMessages(prev => {
                     const next = [...prev];
-                    const last = next[next.length - 1];
-                    if (last && last.role === 'assistant') {
-                      last.content = `Generation failed: ${data.error}`;
-                      if (last.image_progress) {
-                        last.image_progress.status = 'Failed';
-                      }
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        generated_image: parsed.url,
+                        image_prompt: parsed.prompt,
+                        image_progress: undefined
+                      };
                     }
                     return next;
                   });
-                  showToast(data.error || "ComfyUI generation error", "error");
-                } else if (data.type === 'project_created') {
-                  onProjectCreatedFromChat(data.project_name, data.default_file);
-                } else if (!isImageTask && data.message && data.message.content) {
-                  assistantReply += data.message.content;
-                  if (!isStarted) {
-                    setMessages(prev => [...prev, {
-                      role: 'assistant',
-                      content: assistantReply,
-                      modelUsed: effectiveModel
-                    }]);
-                    isStarted = true;
-                  } else {
-                    setMessages(prev => {
-                      const updated = [...prev];
-                      updated[updated.length - 1].content = assistantReply;
-                      return updated;
-                    });
-                  }
+                } else if (parsed.type === 'project_created') {
+                  onProjectCreatedFromChat(parsed.project, parsed.default_file);
+                  onRefreshProjectTree?.();
                 }
-              } catch (_) {}
+              } catch {
+                // ignore
+              }
             }
           }
         }
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          showToast(err.message || "Request failed", "error");
-        }
-      } finally {
-        setIsLoading(false);
-        abortControllerRef.current = null;
-        setTimeout(loadHistory, 300);
-      }
-    } else {
-      // Режим Project Agent
-      try {
+      } else {
         const res = await fetch(`${API_BASE_URL}/agent/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
           body: JSON.stringify({
             project_name: activeProject,
-            prompt: prompt,
-            model: effectiveModel,
-            images: currentImages.length > 0 ? currentImages : undefined,
-            active_file_path: activeFilePath || undefined,
-            active_file_content: activeFileContent || undefined,
-            comfy_checkpoint: selectedComfy || undefined
-          })
+            prompt: trimmed,
+            model: selectedOllama,
+            active_file: activeFilePath || undefined,
+            file_content: activeFileContent || undefined,
+            comfy_checkpoint: selectedComfy
+          }),
+          signal: abortControllerRef.current.signal
         });
 
-        if (!res.ok) throw new Error("Execution failed");
+        if (!res.ok || !res.body) {
+          throw new Error('Failed to start agent task execution');
+        }
 
-        const reader = res.body?.getReader();
+        const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let assistantReply = '';
-        let isStarted = false;
-        let isStreamingToFile = false;
-        let currentStreamFile = '';
         let buffer = '';
 
-        while (reader) {
+        while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
+          const lines = buffer.split('\n');
           buffer = lines.pop() || '';
 
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('data:')) {
-              const jsonStr = trimmed.replace(/^data:\s*/, '');
-              if (!jsonStr) continue;
-
+            if (line.startsWith('data: ')) {
+              const rawData = line.slice(6).trim();
+              if (rawData === '[DONE]') break;
               try {
-                const data = JSON.parse(jsonStr);
-
-                if (data.type === 'meta') {
-                  setActiveModelUsed(data.model);
-                } else if (data.type === 'stream_target') {
-                  isStreamingToFile = true;
-                  currentStreamFile = data.file_path;
-                  onLiveStreamToEditor(currentStreamFile, '', true);
-                } else if (data.type === 'image_progress') {
+                const parsed = JSON.parse(rawData);
+                if (parsed.message?.content) {
                   setMessages(prev => {
                     const next = [...prev];
-                    const last = next[next.length - 1];
-                    const pInfo = {
-                      step: data.step ?? 0,
-                      total: data.total ?? 20,
-                      percent: data.percent ?? 0,
-                      status: data.status || "Sampling..."
-                    };
-                    if (last && last.role === 'assistant') {
-                      last.image_progress = pInfo;
-                    } else {
-                      next.push({
-                        role: 'assistant',
-                        content: '🎨 Генерирую изображение через ComfyUI...',
-                        modelUsed: effectiveModel,
-                        image_progress: pInfo
-                      });
-                      isStarted = true;
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        content: next[lastIdx].content + parsed.message.content
+                      };
                     }
                     return next;
                   });
-                } else if (data.type === 'file_saved') {
-                  onFileAutoSaved(data.file_path, data.revision);
-                  isStreamingToFile = false;
-                  currentStreamFile = "";
+                } else if (parsed.type === 'stream_code') {
+                  onLiveStreamToEditor(parsed.path, parsed.chunk, parsed.is_start);
+                } else if (parsed.type === 'file_saved') {
+                  onFileAutoSaved(parsed.path, parsed.revision);
                   onRefreshProjectTree?.();
-                } else if (data.message && data.message.content) {
-                  const token = data.message.content;
-
-                  if (isStreamingToFile) {
-                    onLiveStreamToEditor(currentStreamFile, token, false);
-                  } else {
-                    assistantReply += token;
-                    if (!isStarted) {
-                      setMessages(prev => [...prev, {
-                        role: 'assistant',
-                        content: assistantReply,
-                        modelUsed: effectiveModel
-                      }]);
-                      isStarted = true;
-                    } else {
-                      setMessages(prev => {
-                        const updated = [...prev];
-                        updated[updated.length - 1].content = assistantReply;
-                        return updated;
-                      });
+                } else if (parsed.type === 'image_progress') {
+                  setMessages(prev => {
+                    const next = [...prev];
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        image_progress: parsed.data
+                      };
                     }
-                  }
+                    return next;
+                  });
+                } else if (parsed.type === 'image_result') {
+                  setMessages(prev => {
+                    const next = [...prev];
+                    const lastIdx = next.length - 1;
+                    if (lastIdx >= 0) {
+                      next[lastIdx] = {
+                        ...next[lastIdx],
+                        generated_image: parsed.url,
+                        image_prompt: parsed.prompt,
+                        image_progress: undefined
+                      };
+                    }
+                    return next;
+                  });
+                  onRefreshProjectTree?.();
                 }
-              } catch (_) {}
+              } catch {
+                // ignore
+              }
             }
           }
         }
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          showToast(err.message || "Agent execution error", "error");
-        }
-      } finally {
-        setIsLoading(false);
-        abortControllerRef.current = null;
       }
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        showToast("Error processing request", "error");
+      }
+    } finally {
+      setIsLoading(false);
+      abortControllerRef.current = null;
+      fetchSessionStats();
     }
   };
 
+  const handleCopyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCodeIdx(id);
+    setTimeout(() => setCopiedCodeIdx(null), 2000);
+  };
+
+  const renderMessageContent = (content: string) => {
+    const codeBlockRegex = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {content.substring(lastIndex, match.index)}
+          </span>
+        );
+      }
+      const lang = match[1] || 'code';
+      const code = match[2];
+      const codeId = `code-${match.index}`;
+
+      parts.push(
+        <div key={codeId} style={{
+          marginTop: 6,
+          marginBottom: 6,
+          borderRadius: 6,
+          overflow: 'hidden',
+          border: '1px solid var(--border-color)',
+          background: '#0d1117'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '3px 8px',
+            backgroundColor: 'rgba(255,255,255,0.05)',
+            fontSize: 11,
+            color: '#8b949e'
+          }}>
+            <span>{lang}</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {onInsertCodeToEditor && (
+                <button
+                  onClick={() => onInsertCodeToEditor(code)}
+                  title="Insert into active editor"
+                  style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }}
+                >
+                  <ArrowDownToLine size={12} />
+                  Insert
+                </button>
+              )}
+              <button
+                onClick={() => handleCopyText(code, codeId)}
+                title="Copy code"
+                style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }}
+              >
+                {copiedCodeIdx === codeId ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                Copy
+              </button>
+            </div>
+          </div>
+          <pre style={{ margin: 0, padding: '8px 10px', overflowX: 'auto', fontSize: 12, color: '#e6edf3', fontFamily: 'monospace' }}>
+            <code>{code}</code>
+          </pre>
+        </div>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < content.length) {
+      parts.push(
+        <span key={`text-${lastIndex}`}>
+          {content.substring(lastIndex)}
+        </span>
+      );
+    }
+
+    return parts.length > 0 ? parts : content;
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)', overflow: 'hidden' }}>
-      {/* Switch Header */}
-      <div style={{ 
-        padding: '8px 12px', 
-        borderBottom: '1px solid var(--border-color)', 
-        display: 'flex', 
-        alignItems: 'center', 
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-panel)' }}>
+      {/* Header Tabs */}
+      <div className="right-panel-header" style={{
+        height: 38,
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'space-between',
-        background: 'var(--bg-card)'
+        padding: '0 8px',
+        borderBottom: '1px solid var(--border-color)',
+        background: 'var(--bg-header)'
       }}>
-        <div style={{ display: 'flex', gap: '4px' }}>
+        <div style={{ display: 'flex', gap: 4 }}>
           <button
             onClick={() => onModeChange('chat')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: 5,
               padding: '4px 10px',
-              borderRadius: '6px',
+              borderRadius: 5,
               border: 'none',
-              background: mode === 'chat' ? 'var(--hover-item)' : 'transparent',
-              color: mode === 'chat' ? 'var(--btn-primary)' : 'var(--text-muted)',
-              fontSize: '11.5px',
-              fontWeight: mode === 'chat' ? 600 : 500,
+              background: mode === 'chat' ? 'var(--bg-active-tab, rgba(59, 130, 246, 0.15))' : 'transparent',
+              color: mode === 'chat' ? 'var(--primary-color, #2563eb)' : 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: 12,
               cursor: 'pointer'
             }}
           >
             <MessageSquare size={13} />
             Global Chat
           </button>
-
           <button
             onClick={() => onModeChange('agent')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: 5,
               padding: '4px 10px',
-              borderRadius: '6px',
+              borderRadius: 5,
               border: 'none',
-              background: mode === 'agent' ? 'var(--hover-item)' : 'transparent',
-              color: mode === 'agent' ? 'var(--btn-primary)' : 'var(--text-muted)',
-              fontSize: '11.5px',
-              fontWeight: mode === 'agent' ? 600 : 500,
+              background: mode === 'agent' ? 'var(--bg-active-tab, rgba(59, 130, 246, 0.15))' : 'transparent',
+              color: mode === 'agent' ? 'var(--primary-color, #2563eb)' : 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: 12,
               cursor: 'pointer'
             }}
           >
@@ -684,491 +546,275 @@ export default function RightPanel({
           </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <button
-            onClick={handleClearHistory}
-            title="Clear history"
-            className="theme-toggle-btn"
-            style={{ padding: '3px 6px', color: '#ef4444' }}
-          >
-            <Trash2 size={13} />
-          </button>
+        <button
+          onClick={handleClearHistory}
+          className="theme-toggle-btn"
+          style={{ padding: 4 }}
+          title={mode === 'chat' ? "Clear Global Chat" : "Clear Project Agent History"}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      {/* Diagnostics / Status Bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '4px 12px',
+        backgroundColor: 'var(--bg-subtle, rgba(0, 0, 0, 0.2))',
+        borderBottom: '1px solid var(--border-color)',
+        fontSize: '11px',
+        color: 'var(--text-muted)',
+        fontFamily: 'monospace'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span title="Total messages in current session">
+            <strong style={{ color: 'var(--text-main)' }}>Messages:</strong> {sessionStats.msgCount}
+          </span>
+          <span title="MongoDB BSON session size">
+            <strong style={{ color: 'var(--text-main)' }}>DB:</strong> {sessionStats.sizeKb > 1024 ? `${(sessionStats.sizeKb / 1024).toFixed(2)} MB` : `${sessionStats.sizeKb} KB`}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Active model context window size">
+          <strong style={{ color: 'var(--text-main)' }}>Context:</strong> 
+          <span style={{ color: 'var(--primary-color, #3b82f6)', fontWeight: 600 }}>
+            {modelContext ? (modelContext >= 1024 ? `${Math.round(modelContext / 1024)}k` : `${modelContext}`) : 'auto'}
+          </span>
         </div>
       </div>
 
       {mode === 'agent' && (
-        <div style={{ 
-          padding: '5px 12px', 
-          background: 'var(--bg-panel-sub)', 
+        <div style={{
+          padding: '4px 12px',
+          fontSize: 11,
           borderBottom: '1px solid var(--border-color)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '11px'
+          color: 'var(--text-muted)'
         }}>
-          <span style={{ color: 'var(--text-muted)' }}>
-            Project: <b style={{ color: 'var(--text-main)' }}>{activeProject || 'None'}</b>
-          </span>
-          {activeFilePath && (
-            <span style={{ color: 'var(--text-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              File: <b style={{ color: 'var(--text-main)' }}>{activeFilePath}</b>
-            </span>
-          )}
+          Project: <strong style={{ color: 'var(--text-main)' }}>{activeProject || 'None'}</strong>
         </div>
       )}
 
-      {/* Messages Feed */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Messages Scroll Area */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {messages.length === 0 ? (
-          <div style={{ 
-            height: '100%', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            color: 'var(--text-muted)',
-            textAlign: 'center',
-            padding: '0 20px',
-            gap: '8px'
-          }}>
-            {mode === 'chat' ? (
-              <>
-                <MessageSquare size={32} opacity={0.3} />
-                <p style={{ margin: 0, fontSize: '13px', fontWeight: 500 }}>Global AI Chat</p>
-                <p style={{ margin: 0, fontSize: '11.5px', lineHeight: 1.4 }}>
-                  Create projects:<br/>
-                  <code style={{ background: 'var(--hover-item)', padding: '2px 5px', borderRadius: '4px' }}>создай докер проект test-docker</code><br/>
-                  Or generate images via ComfyUI:<br/>
-                  <code style={{ background: 'var(--hover-item)', padding: '2px 5px', borderRadius: '4px' }}>создай картинку киберпанк город</code>
-                </p>
-              </>
-            ) : (
-              <>
-                <Sparkles size={32} opacity={0.3} />
-                <p style={{ margin: 0, fontSize: '13px', fontWeight: 500 }}>Project Developer Agent</p>
-                <p style={{ margin: 0, fontSize: '11.5px', lineHeight: 1.4 }}>
-                  {activeProject 
-                    ? `Agent ready for "${activeProject}".` 
-                    : 'Select a project on the left panel to begin.'}
-                </p>
-              </>
-            )}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: 8 }}>
+            {mode === 'chat' ? <MessageSquare size={32} opacity={0.3} /> : <Sparkles size={32} opacity={0.3} />}
+            <span style={{ fontSize: 12 }}>
+              {mode === 'chat' ? 'Start a conversation or ask for code/images' : (activeProject ? `Ready to assist in "${activeProject}"` : 'Select a project to activate agent')}
+            </span>
           </div>
         ) : (
-          messages.map((m, idx) => (
-            <div 
-              key={idx} 
-              onMouseEnter={() => setHoveredMsgIdx(idx)}
-              onMouseLeave={() => setHoveredMsgIdx(null)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
-                position: 'relative'
-              }}
-            >
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                marginBottom: '4px', 
-                fontSize: '10.5px', 
-                color: 'var(--text-muted)' 
-              }}>
-                {m.role === 'assistant' ? (
-                  <>
-                    {m.generated_image || m.image_progress ? <ImageIcon size={11} color="#10b981" /> : <Terminal size={11} color="var(--btn-primary)" />}
-                    <span>{m.modelUsed || activeModelUsed || selectedOllama}</span>
-                  </>
-                ) : (
-                  <span>You</span>
-                )}
-                
-                {/* Actions: Copy & Delete — видны ТОЛЬКО при наведении на сообщение */}
-                <div style={{ 
-                  display: 'inline-flex', 
-                  alignItems: 'center', 
-                  gap: '4px', 
-                  marginLeft: '6px',
-                  opacity: hoveredMsgIdx === idx ? 1 : 0,
-                  pointerEvents: hoveredMsgIdx === idx ? 'auto' : 'none',
-                  transition: 'opacity 0.15s ease-in-out'
-                }}>
-                  <button
-                    onClick={() => handleCopyText(m.content)}
-                    className="theme-toggle-btn"
-                    title="Copy message text"
-                    style={{ padding: '2px 4px' }}
-                  >
-                    <Copy size={11} />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteMessage(idx)}
-                    className="theme-toggle-btn"
-                    title="Delete message"
-                    style={{ padding: '2px 4px', color: '#ef4444' }}
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              </div>
-
+          messages.map((msg, idx) => {
+            const isUser = msg.role === 'user';
+            return (
               <div 
+                key={idx}
+                onMouseEnter={() => setHoveredMsgIdx(idx)}
+                onMouseLeave={() => setHoveredMsgIdx(null)}
                 style={{
-                  maxWidth: '92%',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
-                  fontSize: '12.5px',
-                  lineHeight: '1.45',
-                  wordBreak: 'break-word',
-                  background: m.role === 'user' ? 'var(--btn-primary)' : 'var(--bg-card)',
-                  color: m.role === 'user' ? '#ffffff' : 'var(--text-main)',
-                  border: m.role === 'user' ? 'none' : '1px solid var(--border-color)',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  maxWidth: '88%',
+                  position: 'relative'
                 }}
               >
-                {/* User attached images */}
-                {m.images && m.images.length > 0 && (
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                    {m.images.map((img, i) => (
+                <div style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  lineHeight: 1.45,
+                  background: isUser ? 'var(--primary-color, #2563eb)' : 'var(--bg-card, #1e293b)',
+                  color: isUser ? '#ffffff' : 'var(--text-main)',
+                  border: isUser ? 'none' : '1px solid var(--border-color)'
+                }}>
+                  {renderMessageContent(msg.content)}
+
+                  {/* ComfyUI Progress Bar */}
+                  {msg.image_progress && (
+                    <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'rgba(0,0,0,0.2)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                        <span>ComfyUI Execution</span>
+                        <span>{msg.image_progress.percent}%</span>
+                      </div>
+                      <div style={{ height: 4, width: '100%', background: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${msg.image_progress.percent}%`, background: '#10b981', transition: 'width 0.2s' }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Generated Image Result Card */}
+                  {msg.generated_image && (
+                    <div style={{ marginTop: 8, position: 'relative', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
                       <img 
-                        key={i} 
-                        src={`data:image/jpeg;base64,${img}`} 
-                        alt="attachment" 
-                        style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.2)' }}
+                        src={msg.generated_image} 
+                        alt="generated art" 
+                        style={{ width: '100%', maxHeight: 260, objectFit: 'cover', display: 'block' }}
                       />
-                    ))}
-                  </div>
-                )}
+                      {msg.image_prompt && (
+                        <div style={{ padding: '4px 6px', fontSize: 11, color: 'var(--text-muted)' }}>
+                          {msg.image_prompt}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => onOpenImageModal?.(msg.generated_image!, msg.image_prompt)}
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 6,
+                          background: 'rgba(0,0,0,0.6)',
+                          border: 'none',
+                          color: '#fff',
+                          padding: 4,
+                          borderRadius: 4,
+                          cursor: 'pointer'
+                        }}
+                        title="Enlarge image"
+                      >
+                        <Maximize2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-                {/* Persistent ComfyUI Progress Card */}
-                {m.image_progress && (
+                {/* Message Hover Actions */}
+                {hoveredMsgIdx === idx && (
                   <div style={{
-                    background: 'var(--bg-panel)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    padding: '8px 10px',
-                    marginBottom: '8px',
+                    position: 'absolute',
+                    top: -10,
+                    right: isUser ? 'auto' : 4,
+                    left: isUser ? 4 : 'auto',
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '5px'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <ImageIcon size={12} color="var(--btn-primary)" />
-                        ComfyUI Execution
-                      </span>
-                      <span style={{ color: 'var(--btn-primary)', fontWeight: 600 }}>
-                        {m.image_progress.percent}%
-                      </span>
-                    </div>
-
-                    <div style={{ width: '100%', height: '5px', background: 'var(--hover-item)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div 
-                        style={{ 
-                          height: '100%', 
-                          width: `${m.image_progress.percent}%`, 
-                          background: 'linear-gradient(90deg, #3574f0, #10b981)',
-                          transition: 'width 0.2s ease-in-out'
-                        }} 
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
-                      <span>{m.image_progress.status}</span>
-                      {m.image_progress.total > 0 && <span>Step {m.image_progress.step} / {m.image_progress.total}</span>}
-                    </div>
-                  </div>
-                )}
-
-                {/* Generated Image Preview + Hover Actions */}
-                {m.generated_image && (
-                  <ImageCardWithHover 
-                    imageUrl={m.generated_image}
-                    prompt={m.image_prompt}
-                    activeProject={activeProject}
-                    onCopy={() => handleCopyImage(m.generated_image!)}
-                    onSave={() => handleSaveImageToProject(m.generated_image!)}
-                    onEnlarge={() => onOpenImageModal && onOpenImageModal(m.generated_image!, m.image_prompt)}
-                  />
-                )}
-
-                {/* SD Prompt Section */}
-                {m.image_prompt && (
-                  <div style={{ 
-                    background: 'var(--bg-panel)', 
-                    padding: '6px 8px', 
-                    borderRadius: '6px', 
+                    gap: 3,
+                    background: 'var(--bg-panel)',
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
                     border: '1px solid var(--border-color)',
-                    fontSize: '11px',
-                    color: 'var(--text-muted)',
-                    marginBottom: '6px'
+                    zIndex: 10
                   }}>
-                    <b style={{ color: 'var(--text-main)', display: 'block', marginBottom: '2px' }}>SD Prompt (dolphin-llama3):</b>
-                    <span style={{ fontStyle: 'italic' }}>{m.image_prompt}</span>
+                    <button
+                      onClick={() => handleCopyText(msg.content, `msg-${idx}`)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
+                      title="Copy message text"
+                    >
+                      {copiedCodeIdx === `msg-${idx}` ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteMessage(idx)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
+                      title="Delete message"
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   </div>
                 )}
-
-                {/* Content with code block insertion & copying */}
-                {renderMessageContent(m.content, idx)}
               </div>
-            </div>
-          ))
-        )}
-
-        {isLoading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '11.5px' }}>
-            <Loader2 size={14} className="animate-spin" />
-            <span>Processing request...</span>
-          </div>
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Uploaded Images Preview Strip */}
-      {selectedImages.length > 0 && (
-        <div style={{ padding: '6px 12px', display: 'flex', gap: '8px', background: 'var(--input-bg)', borderTop: '1px solid var(--border-color)' }}>
-          {selectedImages.map((b64, idx) => (
-            <div key={idx} style={{ position: 'relative' }}>
-              <img 
-                src={`data:image/jpeg;base64,${b64}`} 
-                alt="thumb" 
-                style={{ width: '45px', height: '45px', objectFit: 'cover', borderRadius: '4px' }} 
-              />
-              <button
-                onClick={() => setSelectedImages(prev => prev.filter((_, i) => i !== idx))}
-                style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  background: '#ef4444',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '15px',
-                  height: '15px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '9px'
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Input Form with Readonly & Cancel Support */}
-      <form 
-        onSubmit={handleSendMessage}
-        style={{ 
-          padding: '10px 12px', 
-          borderTop: '1px solid var(--border-color)', 
-          background: 'var(--bg-card)',
-          display: 'flex', 
-          gap: '8px', 
-          alignItems: 'center' 
-        }}
-      >
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleImageUpload} 
-          accept="image/*" 
-          multiple 
-          style={{ display: 'none' }} 
-        />
-
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach image"
-          className="theme-toggle-btn"
-          style={{ padding: '6px 7px' }}
-          disabled={isLoading}
-        >
-          <Paperclip size={15} />
-        </button>
-
-        <input 
-          value={inputVal}
-          onChange={e => setInputVal(e.target.value)}
-          onPaste={handlePaste}
-          placeholder={isLoading ? "Generating image... Please wait" : (mode === 'chat' ? "Ask something or: создай картинку киберпанк город..." : "Describe task for project...")}
-          className="studio-input"
-          style={{ 
-            flex: 1, 
-            padding: '7px 10px', 
-            fontSize: '12px',
-            opacity: isLoading ? 0.7 : 1,
-            cursor: isLoading ? 'not-allowed' : 'text'
-          }}
-          readOnly={isLoading}
-          disabled={isLoading}
-        />
-
-        {isLoading ? (
-          <button 
-            type="button" 
-            onClick={handleCancelGeneration}
-            title="Cancel generation"
-            style={{ 
-              padding: '7px 12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              background: '#ef4444',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              gap: '4px',
-              fontSize: '11px',
-              fontWeight: 600
-            }}
-          >
-            <Square size={12} fill="#ffffff" />
-            Cancel
-          </button>
-        ) : (
-          <button 
-            type="submit" 
-            className="btn-primary" 
-            style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            disabled={!inputVal.trim()}
-          >
-            <Send size={14} />
-          </button>
+      {/* Input Area */}
+      <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-header)' }}>
+        {selectedImages.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6, overflowX: 'auto' }}>
+            {selectedImages.map((img, i) => (
+              <div key={i} style={{ position: 'relative', width: 44, height: 44, borderRadius: 4, overflow: 'hidden' }}>
+                <img src={img} alt="attachment" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <button
+                  onClick={() => setSelectedImages(prev => prev.filter((_, idx) => idx !== i))}
+                  style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.7)', border: 'none', color: '#fff', borderRadius: '50%', width: 14, height: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10 }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
         )}
-      </form>
-    </div>
-  );
-}
 
-// Отдельный легковесный компонент для изоляции hover-эффекта кнопок на картинке
-function ImageCardWithHover({
-  imageUrl,
-  prompt,
-  activeProject,
-  onCopy,
-  onSave,
-  onEnlarge
-}: {
-  imageUrl: string;
-  prompt?: string;
-  activeProject: string | null;
-  onCopy: () => void;
-  onSave: () => void;
-  onEnlarge: () => void;
-}) {
-  const [isHovered, setIsHovered] = useState(false);
-
-const formattedSrc = (imageUrl.startsWith("http://") || imageUrl.startsWith("https://") || imageUrl.startsWith("data:"))
-    ? imageUrl
-    : `data:image/png;base64,${imageUrl}`;
-
-  return (
-    <div 
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      style={{ 
-        position: "relative", 
-        borderRadius: "8px", 
-        overflow: "hidden", 
-        border: "1px solid var(--border-color)",
-        maxHeight: "260px",
-        background: "#111",
-        marginBottom: "8px"
-      }}
-    >
-      <img 
-        src={formattedSrc} 
-        alt="generated art" 
-        style={{ width: '100%', display: 'block', objectFit: 'contain', cursor: 'pointer' }}
-        onClick={onEnlarge}
-      />
-      
-      {/* Кнопки действий видны ТОЛЬКО при наведении на картинку */}
-      <div style={{
-        position: 'absolute',
-        right: '8px',
-        bottom: '8px',
-        display: 'flex',
-        gap: '6px',
-        opacity: isHovered ? 1 : 0,
-        pointerEvents: isHovered ? 'auto' : 'none',
-        transition: 'opacity 0.2s ease-in-out'
-      }}>
-        <button
-          type="button"
-          onClick={onCopy}
-          style={{
-            background: 'rgba(0, 0, 0, 0.8)',
-            backdropFilter: 'blur(4px)',
-            color: '#fff',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '5px',
-            padding: '4px 7px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            fontSize: '10.5px',
-            cursor: 'pointer'
-          }}
-          title="Copy image to clipboard"
-        >
-          <Copy size={11} />
-          Copy
-        </button>
-
-        {activeProject && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageSelect}
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+          />
           <button
-            type="button"
-            onClick={onSave}
-            style={{
-              background: 'rgba(0, 0, 0, 0.8)',
-              backdropFilter: 'blur(4px)',
-              color: '#fff',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: '5px',
-              padding: '4px 7px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              cursor: 'pointer'
-            }}
-            title="Save image to project directory"
+            onClick={() => fileInputRef.current?.click()}
+            className="theme-toggle-btn"
+            style={{ padding: 6 }}
+            title="Attach images"
           >
-            <FolderPlus size={11} />
-            Save to Project
+            <Paperclip size={15} />
           </button>
-        )}
 
-        <button
-          type="button"
-          onClick={onEnlarge}
-          style={{
-            background: 'rgba(0, 0, 0, 0.8)',
-            backdropFilter: 'blur(4px)',
-            color: '#fff',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '5px',
-            padding: '4px 7px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            fontSize: '10.5px',
-            cursor: 'pointer'
-          }}
-          title="View full size"
-        >
-          <Maximize2 size={11} />
-          Enlarge
-        </button>
+          <textarea
+            value={inputVal}
+            onChange={(e) => setInputVal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            placeholder={mode === 'chat' ? "Ask question or request image..." : "Give task to agent..."}
+            rows={2}
+            style={{
+              flex: 1,
+              resize: 'none',
+              borderRadius: 6,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-panel)',
+              color: 'var(--text-main)',
+              padding: '6px 8px',
+              fontSize: 12.5,
+              outline: 'none'
+            }}
+          />
+
+          {isLoading ? (
+            <button
+              onClick={handleStopExecution}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 6,
+                border: 'none',
+                background: '#ef4444',
+                color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="Stop execution"
+            >
+              <Square size={14} fill="#fff" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSendMessage}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--primary-color, #2563eb)',
+                color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title="Send message"
+            >
+              <Send size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
