@@ -16,123 +16,124 @@ Self-hosted AI Development Environment: Autonomous Code Assistant & Visual Gener
 > **Notice:** This project is currently in early active development. APIs, architecture, and UI features are subject to frequent changes and improvements.
 
 ### Overview
-Local AI Studio is a self-hosted workspace combining local Large Language Models (LLMs via Ollama) and image generation pipelines (ComfyUI). It provides a full developer workflow for creating, refactoring, and previewing code alongside AI-assisted visual asset production—all containerized and private.
+Local AI Studio is a self-hosted workspace combining local Large Language Models (LLMs via Ollama) and image generation pipelines (ComfyUI). It provides a full developer workflow for creating, running, refactoring, and previewing code alongside AI-assisted visual asset production—all containerized and private.
 
 ### Architecture & Key Features
 - **Decoupled Containerization:** Microservices architecture with FastAPI (backend), React/Vite (frontend), and MongoDB (mongo) managed by Docker Compose.
-- **Embedded Web Terminal:** Interactive bottom terminal powered by `xterm.js` and WebSocket PTY sessions with dynamic project working directory synchronization (`projects/<active-project>`) and native Git support.
+- **Unified Project Lifecycle Management:** Native runtime controls (Start/Stop) for Docker Compose and Python services directly from the project explorer.
+- **Multi-Engine Interactive Preview:** Automatic routing between static HTML renderers, external Docker exposed ports, and an integrated FastAPI reverse-proxy for background Python applications with cache-busting (?_t=timestamp).
+- **Dual-Pane Bottom Workspace:** Interactive xterm.js terminal alongside an API diagnostic Console with per-project request/response tracing, collapsible view, and vertical resizing.
 - **Instant Chat-Driven Project Scaffolding:** Create structured projects directly through natural language chat commands or manually via the project tree.
 - **Agentic Code Generation & Editing:** Autonomous LLM-driven file manipulation, project tree navigation, and code history revision tracking with snapshot recovery.
 - **Integrated Image Pipeline:** Prompt-to-image workflow directly within the workspace with built-in asset storage and base64 hover previews.
-- **Configurable Workspace Paths:** Dynamic host-to-container volume mapping for workspace projects.
-- **Context Isolation & Overflow Protection:** Dual-layer memory architecture: MongoDB preserves 100% of historical messages and Base64 media, while the inference context window dynamically suppresses historical image payloads and uses a 16,384-token sliding window (`num_ctx: 16384`) to prevent context exhaustion.
+- **Context Isolation & Overflow Protection:** Dual-layer memory architecture: MongoDB preserves 100% of historical messages and Base64 media, while the inference context window dynamically suppresses historical image payloads and uses a 16,384-token sliding window (num_ctx: 16384) to prevent context exhaustion.
 
 ---
 
+### Supported Project Types & Scaffolding
+
+You can scaffold projects on the fly using natural language commands in the Global Chat (English or Russian), or create directories manually using the New Project button in the sidebar:
+
+#### 1. Static Web Project
+- **Chat Triggers:** `create static project <name>`, `создай статичный проект <имя>`
+- **Generated Templates:**
+  - `index.html` (semantic HTML5 boilerplate with stylesheet and script links)
+  - `images/` (empty directory for visual assets)
+  - `css/style.css` (modern reset and dark theme starter styling)
+  - `js/script.js` (DOM initialization listener)
+- **Lifecycle & Execution:** No server process required. Served directly by the backend preview handler.
+
+#### 2. Docker Compose Project
+- **Chat Triggers:** `create docker project <name>`, `создай докер проект <имя>`
+- **Generated Templates:**
+  - `app/index.html` (sample web document)
+  - `docker-compose.yml` (production-ready `nginx:alpine` container with port `8080:80` and `./app` volume mount)
+- **Lifecycle & Execution:** Controlled via `POST /api/projects/{name}/compose/up` and `POST /api/projects/{name}/compose/down`.
+
+#### 3. Python Project
+- **Chat Triggers:** `create python project <name>`, `создай пайтон проект <имя>`
+- **Generated Templates:**
+  - `main.py` (`def main():` entrypoint or lightweight HTTP server listening to dynamic `os.environ["PORT"]`)
+  - `requirements.txt` (standard dependencies: `requests`, `pydantic`, `python-dotenv`)
+- **Lifecycle & Execution:** Managed by the backend Process Manager (`POST /api/projects/{name}/python/start` and `stop`), executing in the background with dynamic port allocation (8050–8099).
 
 ---
 
-### Project Scaffolding via Chat & Tree Navigation
-You can scaffold projects on the fly using natural language commands in the Global Chat (English or Russian), or create directories manually using the **New Project** button in the sidebar:
+### Project Preview System
 
-- **Static Web Project:**
-  - *Trigger prompts:* `create static project <name>`, `создай статичный проект <имя>`
-  - *Generated structure:*
-    - `index.html` (semantic HTML5 boilerplate with stylesheet and script links)
-    - `images/` (empty directory for visual assets)
-    - `css/style.css` (modern reset and dark theme starter styling)
-    - `js/script.js` (DOM initialization listener)
-- **Docker Compose Project:**
-  - *Trigger prompts:* `create docker project <name>`, `создай докер проект <имя>`
-  - *Generated structure:*
-    - `app/index.html` (sample web document)
-    - `docker-compose.yml` (production-ready `nginx:alpine` container with port `8080:80` and `./app` volume mount)
-- **Python Project:**
-  - *Trigger prompts:* `create python project <name>`, `создай пайтон проект <имя>`
-  - *Generated structure:*
-    - `main.py` (`def main():` entrypoint)
-    - `requirements.txt` (standard dependencies: `requests`, `pydantic`, `python-dotenv`)
+Clicking the Preview button (external link icon) next to any project resolves automatically depending on the project type:
 
-All template files are generated strictly in English with immediate context initialization in the Project Agent tab.
+1. **Docker Compose Projects:** When running, reads the exposed host port from container metadata (e.g. `8080`) and opens `http://<host>:<port>/?_t=<timestamp>`.
+2. **Python Projects:** Routes through the built-in transparent reverse-proxy:
+   `http://<host>:8000/api/projects/<name>/python/proxy/?_t=<timestamp>`
+   This forwards requests directly to the internal loopback port (`127.0.0.1:<allocated_port>`) without requiring manual Docker port exposure on macOS host.
+3. **Static Projects:** Opens the static HTML renderer endpoint:
+   `http://<host>:8000/api/projects/<name>/preview/?_t=<timestamp>`
+
+*Note: All preview URLs append a timestamp query parameter (?_t=Date.now()) to ensure browser cache busting.*
 
 ---
 
-### Embedded PTY Terminal
-The bottom drawer features an interactive terminal:
-- **xterm.js Integration:** Full VT100/ANSI terminal emulation with resize support and real-time PTY communication over WebSockets.
-- **Dynamic CWD Sync:** Automatically switches directories to `projects/<selected-project>` upon project selection.
-- **Pre-installed Tooling:** Includes native `git`, shell utilities, and container inspection tools.
+### Bottom Drawer: Terminal & API Debug Console
+
+The bottom area occupies 1/3 of the central workspace, supports vertical resizing, and can be collapsed or expanded at any time:
+
+- **Terminal Tab:**
+  - Full VT100/ANSI emulation with xterm.js and WebSocket PTY sessions.
+  - Automatically synchronizes working directory to `projects/<selected-project>`.
+  - Shell reload and screen clear buttons.
+- **Console Tab (API Debugger):**
+  - Live inspection stream of lifecycle API calls (`compose/up`, `compose/down`, `python/start`, `python/stop`).
+  - Color-coded badges for HTTP requests (`-> REQ`), responses (`<- RES 200`), status codes, and execution latency (`ms`).
+  - Collapsible JSON payloads for both requests and server responses.
+  - **Per-Project Isolation:** Each project maintains its own isolated event history.
+  - **Clear Button:** Clears logged events for the currently active project.
+
+---
 
 ### Prerequisites & External Services
 
 #### 1. Ollama Setup (LLMs & Translation)
-Ollama runs locally outside or inside your environment. The studio uses specialized models for reasoning and text processing:
+Ollama runs locally outside or inside your environment:
 - **Code & Chat Model:** `qwen2.5-coder:7b` (or `deepseek-coder-v2`, `llama3.1`).
-- **Built-in Translation Models (Two-stage bridge):** Prompt enrichment uses two integrated models (e.g. `qwen2.5:7b` / `llama3.2`) to bridge Russian/multilingual developer prompts to optimized English ComfyUI prompts.
+- **Translation Bridge:** Prompt enrichment uses two integrated models (e.g. `qwen2.5:7b` / `llama3.2`) to bridge multilingual developer prompts into optimized English ComfyUI tags.
 
-Pull recommended models:
-```bash
-ollama pull qwen2.5-coder:7b
-ollama pull llama3.2:latest
-```
+Recommended models:
+- `ollama pull qwen2.5-coder:7b`
+- `ollama pull llama3.2:latest`
 
 #### 2. ComfyUI Setup (Image Generation)
-Make sure ComfyUI is running with API access enabled (`--listen 0.0.0.0`).
-- **Required Custom Nodes:**
-  - ComfyUI-Manager
-  - ComfyUI-Custom-Scripts
-- **Required Checkpoints / Models:**
-  - Standard SDXL / SD1.5 or Flux checkpoints in `ComfyUI/models/checkpoints/` (e.g., `sd_xl_base_1.0.safetensors`).
-  - Corresponding VAE and CLIP models according to your generation workflow.
+Make sure ComfyUI is running with API access enabled (`--listen 0.0.0.0`):
+- **Custom Nodes:** ComfyUI-Manager, ComfyUI-Custom-Scripts.
+- **Checkpoints:** SDXL, SD1.5 or Flux checkpoints in `ComfyUI/models/checkpoints/`.
 
 ---
 
 ### Quick Start & Deployment
 
-1. **Clone the repository:**
-```bash
-git clone <repo-url> local-ai-studio
-cd local-ai-studio
-```
+1. Clone the repository:
+   `git clone <repo-url> local-ai-studio`
+   `cd local-ai-studio`
 
-2. **Configure Environment (.env):**
-```bash
-cp .env.example .env
-```
-Key variables in `.env`:
-```env
-# Local directory on host to mount projects into workspace
-PROJECTS_DIR=./projects
+2. Configure Environment:
+   `cp .env.example .env`
 
-# Port bindings
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
-MONGO_PORT=27017
+Key variables:
+- `PROJECTS_DIR=./projects`
+- `BACKEND_PORT=8000`
+- `FRONTEND_PORT=3000`
+- `MONGO_PORT=27017`
+- `OLLAMA_URL=http://host.docker.internal:11434`
+- `COMFY_URL=http://host.docker.internal:8188`
+- `MONGO_URI=mongodb://mongo:27017/local_ai_studio`
+- `DEFAULT_CODER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M`
+- `TRANSLATOR_MODEL=dolphin-llama3:latest`
+- `VISION_MODEL=minicpm-v:latest`
 
-# Integration endpoints
-OLLAMA_URL=http://host.docker.internal:11434
-COMFY_URL=http://host.docker.internal:8188
-MONGO_URI=mongodb://mongo:27017/local_ai_studio
+3. Run via Docker Compose:
+   `docker compose up -d`
 
-# Configurable LLM & Vision Models
-DEFAULT_CODER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
-TRANSLATOR_MODEL=dolphin-llama3:latest
-VISION_MODEL=minicpm-v:latest
-```
-
-3. **Run via Docker Compose:**
-```bash
-docker compose up -d
-```
 Open `http://localhost:3000` in your browser.
-
----
-
-### Image Processing & Multimodal Chat Workflow
-The studio features a hybrid multimodal pipeline separating visual technical analysis from image synthesis:
-- **Visual Analysis (`minicpm-v`):** When attaching images/screenshots with questions (e.g., *"what is in this picture?"*, *"analyze UI layout"*), `minicpm-v` processes sanitized Base64 data and delivers a structured Russian response detailing UI components, layout, and color schemes.
-- **Text-to-Image Generation (ComfyUI + `dolphin-llama3`):** Prompts like *"draw a cat"* or *"create an image of a cyberpunk city"* route to ComfyUI. Multilingual and Russian prompts are enriched and translated by `dolphin-llama3` into high-quality, comma-separated English Stable Diffusion tags.
-- **Image-to-Image / Style Recreation:** When attaching an image and asking to *"create a similar image"*, `minicpm-v` extracts the composition and styling directly into clean English SD tags, feeding ComfyUI (`Realistic_Vision`) to reproduce the design without conversational leaks.
 
 ---
 
@@ -142,117 +143,91 @@ The studio features a hybrid multimodal pipeline separating visual technical ana
 > **Примечание:** Проект находится в стадии активной разработки и тестирования (WIP). Интерфейс, логика работы агентов и структура API могут активно изменяться и дополняться.
 
 ### Описание проекта
-Local AI Studio — это локальная среда разработки и генерации, объединяющая возможности локальных языковых моделей (LLM через Ollama) и генерации изображений (ComfyUI). Платформа предоставляет интерфейс для кодогенерации, навигации по проектам, ревизии версий файлов и создания графических ассетов прямо в проекте без передачи данных во внешние облака.
+Local AI Studio — это локальная среда разработки и генерации, объединяющая возможности локальных языковых моделей (LLM через Ollama) и генерации изображений (ComfyUI). Платформа предоставляет единый интерфейс для кодогенерации, навигации по проектам, версионирования файлов, управления жизненным циклом сервисов и создания графических ассетов без передачи данных в публичные облака.
 
 ### Архитектура и функционал
-- **Полная контейнеризация:** Связка контейнеров FastAPI (backend), React/Vite (frontend) и MongoDB (mongo) под управлением Docker Compose.
-- **Встроенный веб-терминал:** Интерактивная консоль в нижней панели на базе `xterm.js` и WebSocket PTY с автоматической сменой рабочей директории под активный проект (`projects/<проект>`) и предустановленным Git.
-- **Генерация шаблонов проектов через чат:** Мгновенная инициализация типовых проектов прямо из переписки с ассистентом или создание папок вручную в дереве проектов.
-- **Агентное редактирование кода:** Чат-ассистент, способный анализировать контекст файлов, вносить изменения и фиксировать снимки истории (Revision History) с возможностью быстрого отката.
-- **Генерация визуальных ассетов:** Встроенный интерфейс генерации картинок через ComfyUI с автоматическим сохранением графики в выбранную папку активного проекта.
-- **Гибкое управление путями:** Путь к локальным проектам меняется строго через `.env` без правок в коде приложения.
-- **Двухуровневая защита контекста:** Разделение хранилища и инференса. MongoDB хранит 100% истории переписки и вложений, тогда как в контекстное окно Ollama передается динамическое скользящее окно с изоляцией тяжелых Base64-строк и расширенным лимитом токенов (`num_ctx: 16384`), предотвращая сбои переполнения памяти.
+- **Полная контейнеризация:** Микросервисная архитектура FastAPI (бэкенд), React/Vite (фронтенд) и MongoDB (база данных) под управлением Docker Compose.
+- **Единое управление запуском и остановкой:** Кнопки запуска и остановки (Play / Stop) прямо в дереве проектов для контейнеров Docker Compose и фоновых скриптов Python.
+- **Умная система интерактивного превью:** Автоматическая маршрутизация между статическими HTML-файлами, внешними портами Docker и встроенным Reverse-proxy для Python с автоматическим сбросом кэша браузера (?_t=timestamp).
+- **Нижняя панель (Terminal + Console):** Сплит-панель с полноценным веб-терминалом на базе xterm.js и окном диагностической консоли для отслеживания API-запросов запуска/остановки с индивидуальной историей по проектам.
+- **Генерация шаблонов проектов через чат:** Мгновенная инициализация проектов по текстовым запросам или вручную через интерфейс.
+- **Агентное редактирование кода:** Ассистент анализирует контекст файлов, создаёт правки и фиксирует снимки истории (Revision History) с возможностью быстрого отката.
+- **Интегрированная генерация изображений:** Встроенный интерфейс создания картинок через ComfyUI с сохранением в папку активного проекта и предпросмотром при наведении.
+- **Защита контекста от переполнения:** MongoDB сохраняет полную историю сообщений и Base64-вложений, тогда как в окно LLM инференса передается скользящее окно с изоляцией тяжелых картинок и лимитом в 16 384 токенов (num_ctx: 16384).
 
 ---
 
+### Поддерживаемые типы проектов и шаблоны
+
+Создать проект можно с помощью текстовой команды в общем чате или нажатием кнопки «New Project» в боковой панели:
+
+#### 1. Статичный веб-проект (Static)
+- **Команды в чате:** `создай статичный проект <имя>`, `create static project <name>`
+- **Шаблоны файлов:**
+  - `index.html` (семантическая разметка HTML5 с подключением CSS и JS)
+  - `images/` (папка для графических ассетов)
+  - `css/style.css` (базовые стили и тёмная тема)
+  - `js/script.js` (обработчик события загрузки DOM)
+- **Запуск:** Не требует серверного процесса, обслуживается встроенным статическим обработчиком.
+
+#### 2. Docker-проект (Docker Compose)
+- **Команды в чате:** `создай докер проект <имя>`, `create docker project <name>`
+- **Шаблоны файлов:**
+  - `app/index.html` (стартовая веб-страница сервиса)
+  - `docker-compose.yml` (контейнер `nginx:alpine` с пробросом порта `8080:80` и монтированием каталога `./app`)
+- **Запуск и остановка:** Управляются кнопками в дереве проектов через эндпоинты `/api/projects/{name}/compose/up` и `/compose/down`.
+
+#### 3. Python-проект (Python)
+- **Команды в чате:** `создай пайтон проект <имя>`, `create python project <name>`
+- **Шаблоны файлов:**
+  - `main.py` (точка входа или HTTP-сервер, слушающий порт из переменной окружения `os.environ.get("PORT")`)
+  - `requirements.txt` (зависимости: `requests`, `pydantic`, `python-dotenv`)
+- **Запуск и остановка:** Управляются встроенным менеджером процессов бэкенда (`/api/projects/{name}/python/start` и `/stop`) с автоматическим выделением свободного порта из диапазона 8050–8099.
 
 ---
 
-### Создание проектов через чат и файловое дерево
-Инициализировать новые проекты можно с помощью естественных команд в общем чате (на русском или английском языках), а также вручную кнопкой **«New Project»** в панели дерева файлов:
+### Механизм интерактивного превью (Preview)
 
-- **Статичный веб-проект (Static):**
-  - *Команды в чате:* `создай статичный проект <имя>`, `create static project <name>`
-  - *Создаваемая структура файлов:*
-    - `index.html` (базовая семантическая разметка с подключением стилей и скриптов)
-    - `images/` (каталог для графики и ассетов)
-    - `css/style.css` (базовые стили и оформление темной темы)
-    - `js/script.js` (обработчик готовности DOM)
-- **Docker-проект (Nginx Web):**
-  - *Команды в чате:* `создай докер проект <имя>`, `create docker project <name>`
-  - *Создаваемая структура файлов:*
-    - `app/index.html` (стартовая веб-страница сервиса)
-    - `docker-compose.yml` (контейнер `nginx:alpine`, маппинг порта `8080:80` и монтирование тома `./app`)
-- **Python-проект (Python):**
-  - *Команды в чате:* `создай пайтон проект <имя>`, `create python project <name>`
-  - *Создаваемая структура файлов:*
-    - `main.py` (точка входа с функцией `main()`)
-    - `requirements.txt` (стандартный набор библиотек: `requests`, `pydantic`, `python-dotenv`)
+Нажатие на кнопку Preview (иконка внешней ссылки со стрелкой) автоматически определяет тип проекта:
 
-Все шаблоны и файлы генерируются строго на английском языке, а переписка и контекст агента подтягиваются автоматически.
+1. **Docker Compose:** Если контейнеры запущены, считывается внешний порт (например, `8080`) и в новой вкладке открывается `http://<host>:<port>/?_t=<timestamp>`.
+2. **Python-проекты:** Запрос направляется на встроенный прозрачный reverse-proxy бэкенда:
+   `http://<host>:8000/api/projects/<name>/python/proxy/?_t=<timestamp>`
+   Бэкенд сам перенаправляет трафик на локальный порт процесса (`127.0.0.1:<port>`) внутри контейнера без ручного проброса портов в Compose.
+3. **Статические проекты:** Открывается прямой роут предпросмотра:
+   `http://<host>:8000/api/projects/<name>/preview/?_t=<timestamp>`
+
+*Каждый URL снабжён меткой времени `?_t=Date.now()`, предотвращающей кэширование браузером.*
 
 ---
 
-### Интерактивный терминал (PTY)
-В нижней части рабочего пространства доступен полнофункциональный терминал:
-- **xterm.js и WebSocket:** Поддержка ANSI-цветов, копирования/вставки, автоподстройки размеров и прямого PTY-канала.
-- **Синхронизация рабочей папки:** При переключении проектов терминал автоматически открывает сессию в `projects/<название-проекта>`.
-- **Встроенные утилиты:** Внутри контейнера доступен `git` для коммитов и работы с ветками непосредственно из веб-интерфейса.
+### Нижняя панель: Terminal и отладочная Console
 
-### Требования и интеграции
+Нижняя область занимает 1/3 высоты центрального экрана, масштабируется мышью по высоте и сворачивается в полосу:
 
-#### 1. Установка и настройка Ollama
-Ollama запускается на локальной машине:
-- **Основная модель для кода и агента:** `qwen2.5-coder:7b` (или `deepseek-coder`).
-- **Модели для перевода (2 встроенные модели):** Для корректного составления промптов в ComfyUI используется двухэтапная цепочка перевода: модели переводят и адаптируют запросы с русского языка на специализированный английский синтаксис промптов.
-
-Команды для скачивания моделей:
-```bash
-ollama pull qwen2.5-coder:7b
-ollama pull llama3.2:latest
-```
-
-#### 2. Настройка ComfyUI
-ComfyUI должен быть запущен с открытым сетевым доступом (`--listen 0.0.0.0`):
-- **Необходимые Custom Nodes:**
-  - ComfyUI-Manager
-  - Ноды для работы с WebSocket API (ComfyUI-Custom-Scripts и вспомогательные пайплайны).
-- **Модели и чекпоинты:**
-  - Базовые модели генерации (`sd_xl_base_1.0.safetensors`, `v1-5-pruned-emaonly.safetensors` или Flux) в папке `ComfyUI/models/checkpoints/`.
+- **Вкладка Terminal:**
+  - Полноценная эмуляция VT100/ANSI на xterm.js через WebSocket PTY.
+  - Автоматическая смена рабочей директории на `projects/<выбранный-проект>`.
+  - Кнопки перезапуска сессии и очистки экрана.
+- **Вкладка Console (Дебаггер API):**
+  - Живое логирование вызовов запуска и остановки (`compose/up`, `compose/down`, `python/start`, `python/stop`).
+  - Цветовая индикация запросов (`-> REQ`), ответов (`<- RES 200`), ошибок (`X ERR`) и миллисекунд выполнения.
+  - JSON-просмотр тел запросов и ответов бэкенда.
+  - **Раздельная история по проектам:** У каждого проекта свой независимый журнал логов.
+  - **Кнопка очистки:** Сбрасывает журнал активного проекта.
 
 ---
 
 ### Развертывание и запуск
 
-1. **Клонирование репозитория:**
-```bash
-git clone <repo-url> local-ai-studio
-cd local-ai-studio
-```
+1. Клонирование репозитория:
+   `git clone <repo-url> local-ai-studio`
+   `cd local-ai-studio`
 
-2. **Настройка файла переменных (.env):**
-```bash
-cp .env.example .env
-```
-Основные переменные:
-```env
-# Папка на вашем диске, в которой лежат проекты:
-PROJECTS_DIR=./projects
+2. Файл переменных окружения:
+   `cp .env.example .env`
 
-# Сетевые порты сервисов:
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
-MONGO_PORT=27017
+3. Запуск контейнеров:
+   `docker compose up -d`
 
-# Адреса внешних локальных сервисов:
-OLLAMA_URL=http://host.docker.internal:11434
-COMFY_URL=http://host.docker.internal:8188
-MONGO_URI=mongodb://mongo:27017/local_ai_studio
-
-# Настраиваемые модели (LLM, Vision, переводчик)
-DEFAULT_CODER_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
-TRANSLATOR_MODEL=dolphin-llama3:latest
-VISION_MODEL=minicpm-v:latest
-```
-
-3. **Запуск контейнеров:**
-```bash
-docker compose up -d
-```
-Интерфейс доступен по адресу `http://localhost:3000`.
-
-### Работа с изображениями и мультимодальный чат
-В студии реализован гибридный мультимодальный пайплайн, разделяющий визуальный анализ и синтез изображений:
-- **Визуальный анализ (`minicpm-v`):** При прикреплении картинок или скриншотов с вопросами (*«что на картинке?»*, *«разбери UI макет»*) подключается `minicpm-v`. Бэкенд очищает Base64 от data-URI префиксов и возвращает подробный технический разбор элементов интерфейса, текста и палитры на русском языке.
-- **Генерация изображений с нуля (Text-to-Image через ComfyUI + `dolphin-llama3`):** Команды вроде *«нарисуй кота»* или *«создай изображение киберпанк города»* маршрутизируются в ComfyUI. Запрос пользователя переводится и обогащается моделью `dolphin-llama3` в детализированный набор английских тегов для Stable Diffusion.
-- **Воссоздание стиля и макетов (Image Recreation):** Если прикрепить изображение с просьбой *«создай такую же картинку»*, `minicpm-v` считывает композицию, структуру и тему, формируя чистый английский промпт для ComfyUI (чекпоинт `Realistic_Vision`) для генерации похожего дизайна.
+Студия откроется по адресу `http://localhost:3000`.

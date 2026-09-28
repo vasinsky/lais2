@@ -31,6 +31,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./backend:/app
       - ${PROJECTS_DIR:-./projects}:/app/projects
       - ./generated_images:/app/generated_images

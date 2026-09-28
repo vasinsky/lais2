@@ -1,23 +1,7 @@
+import { consoleLogger } from "../../services/consoleLogger";
 import { API_BASE_URL } from "../../config";
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  Folder, 
-  FolderOpen, 
-  FileCode, 
-  FileImage, 
-  RotateCw, 
-  Trash2, 
-  FilePlus, 
-  FolderPlus, 
-  History, 
-  Clock, 
-  ChevronRight, 
-  ChevronDown, 
-  AlertTriangle, 
-  Eye, 
-  EyeOff, 
-  X 
-} from 'lucide-react';
+import { Folder, FolderOpen, FileCode, FileImage, RotateCw, Trash2, FilePlus, FolderPlus, History, Clock, ChevronRight, ChevronDown, AlertTriangle, Eye, EyeOff, Play, Square, Loader2, ExternalLink, X } from 'lucide-react';
 import { useToast } from '../Toast';
 
 export interface FileHistoryItem {
@@ -89,7 +73,160 @@ export default function ProjectTree({
   onSelectHistoryItem,
   onHistoryCleared
 }: ProjectTreeProps) {
+  const handleOpenPreview = (projName: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const host = window.location.hostname || "localhost";
+    const ts = Date.now();
+    const cStatus = composeStatus[projName];
+    const pyStatus = pythonStatus[projName];
+
+    // 1. Если запущен Docker Compose — открываем его внешний порт
+    if (cStatus?.running && cStatus.port) {
+      window.open(`http://${host}:${cStatus.port}/?_t=${ts}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    // 2. Если запущен Python-сервер — открываем встроенный прокси бэкенда
+    if (pyStatus?.running) {
+      const port = window.location.port ? "8000" : "";
+      const url = `http://${host}:${port || 8000}/api/projects/${encodeURIComponent(projName)}/python/proxy/?_t=${ts}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    // 3. Статический проект (HTML / JS / CSS)
+    const port = window.location.port ? "8000" : "";
+    const url = `http://${host}:${port || 8000}/api/projects/${encodeURIComponent(projName)}/preview/?_t=${ts}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
   const [projects, setProjects] = useState<string[]>([]);
+  const [composeStatus, setComposeStatus] = useState<Record<string, { has_compose: boolean; running: boolean; port?: number | null }>>({});
+  const [pythonStatus, setPythonStatus] = useState<Record<string, { has_python: boolean; running: boolean; port?: number | null }>>({});
+  const [loadingPython, setLoadingPython] = useState<Record<string, boolean>>({});
+  const [loadingCompose, setLoadingCompose] = useState<Record<string, boolean>>({});
+
+  const checkPythonStatus = async (projName: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projName)}/python/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setPythonStatus(prev => ({ ...prev, [projName]: data }));
+      }
+    } catch (_) {}
+  };
+
+  const handlePythonToggle = async (projName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const isRunning = pythonStatus[projName]?.running;
+    const action = isRunning ? "stop" : "start";
+    setLoadingPython(prev => ({ ...prev, [projName]: true }));
+    const targetUrl = `${API_BASE_URL}/projects/${encodeURIComponent(projName)}/python/${action}`;
+    const startTime = Date.now();
+    consoleLogger.log({
+      project: projName,
+      type: "request",
+      method: "POST",
+      url: targetUrl,
+      payload: { action, target: "python-process" }
+    });
+
+    try {
+      const res = await fetch(targetUrl, { method: "POST" });
+      const durationMs = Date.now() - startTime;
+      let respData = null;
+      try { respData = await res.clone().json(); } catch (_) {}
+
+      consoleLogger.log({
+        project: projName,
+        type: res.ok ? "response" : "error",
+        method: "POST",
+        url: targetUrl,
+        status: res.status,
+        durationMs,
+        payload: respData
+      });
+
+      if (res.ok) {
+        await checkPythonStatus(projName);
+      }
+    } catch (err: any) {
+      consoleLogger.log({
+        project: projName,
+        type: "error",
+        method: "POST",
+        url: targetUrl,
+        durationMs: Date.now() - startTime,
+        payload: { error: err?.message || String(err) }
+      });
+    } finally {
+      setLoadingPython(prev => ({ ...prev, [projName]: false }));
+    }
+  };
+
+  const checkComposeStatus = async (projName: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(projName)}/compose/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setComposeStatus(prev => ({ ...prev, [projName]: data }));
+      }
+    } catch (_) {}
+  };
+
+    // Auto-check docker-compose status for projects
+  useEffect(() => {
+    if (projects && projects.length > 0) {
+      projects.forEach((p) => { checkComposeStatus(p); checkPythonStatus(p); });
+    }
+  }, [projects]);
+
+  const toggleCompose = async (projName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const current = composeStatus[projName];
+    const action = current?.running ? 'down' : 'up';
+    setLoadingCompose(prev => ({ ...prev, [projName]: true }));
+    const targetUrl = `${API_BASE_URL}/projects/${encodeURIComponent(projName)}/compose/${action}`;
+    const startTime = Date.now();
+    consoleLogger.log({
+      project: projName,
+      type: "request",
+      method: "POST",
+      url: targetUrl,
+      payload: { action, target: "docker-compose" }
+    });
+
+    try {
+      const res = await fetch(targetUrl, { method: "POST" });
+      const durationMs = Date.now() - startTime;
+      let respData = null;
+      try { respData = await res.clone().json(); } catch (_) {}
+
+      consoleLogger.log({
+        project: projName,
+        type: res.ok ? "response" : "error",
+        method: "POST",
+        url: targetUrl,
+        status: res.status,
+        durationMs,
+        payload: respData
+      });
+
+      if (res.ok) {
+        await checkComposeStatus(projName);
+      }
+    } catch (err: any) {
+      consoleLogger.log({
+        project: projName,
+        type: "error",
+        method: "POST",
+        url: targetUrl,
+        durationMs: Date.now() - startTime,
+        payload: { error: err?.message || String(err) }
+      });
+    }
+    setLoadingCompose(prev => ({ ...prev, [projName]: false }));
+  };
+
   const [treeData, setTreeData] = useState<Record<string, TreeItem[]>>({});
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [draggedItem, setDraggedItem] = useState<{ path: string; projName: string } | null>(null);
@@ -531,7 +668,7 @@ export default function ProjectTree({
           PROJECTS TREE
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {activeProject && (
+          {activeProject ? (
             <>
               <button
                 onClick={() => openCreateModal('create-file')}
@@ -550,16 +687,16 @@ export default function ProjectTree({
                 <FolderPlus size={13} />
               </button>
             </>
+          ) : (
+            <button
+              onClick={openCreateProjectModal}
+              className="theme-toggle-btn"
+              style={{ padding: 4 }}
+              title="New project directory"
+            >
+              <FolderPlus size={13} />
+            </button>
           )}
-
-                    <button
-            onClick={openCreateProjectModal}
-            className="theme-toggle-btn"
-            style={{ padding: 4 }}
-            title="New project directory"
-          >
-            <FolderPlus size={13} />
-          </button>
           <button
             onClick={() => setShowHidden(prev => !prev)}
             className="theme-toggle-btn"
@@ -588,7 +725,14 @@ export default function ProjectTree({
       </div>
 
       {/* Projects List */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+      <div 
+        style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            onSelectProject("");
+          }
+        }}
+      >
         {visibleProjects.length === 0 ? (
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
             <div>
@@ -664,6 +808,59 @@ export default function ProjectTree({
 
                   {/* Иконки действий для проектов: всегда видны при активности строки или ховере */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {pythonStatus[proj]?.has_python && !composeStatus[proj]?.has_compose && (
+                      <button
+                        className="tree-action-btn project-btn"
+                        onClick={(e) => handlePythonToggle(proj, e)}
+                        title={
+                          loadingPython[proj]
+                            ? "Working..."
+                            : pythonStatus[proj]?.running
+                            ? `Stop Python Server "${proj}"`
+                            : `Start Python Server "${proj}"`
+                        }
+                        style={{
+                          color: pythonStatus[proj]?.running
+                            ? "var(--success-color, #10b981)"
+                            : "var(--text-muted)"
+                        }}
+                      >
+                        {loadingPython[proj] ? (
+                          <span className="spinner-border spinner-border-sm" style={{ width: 12, height: 12 }} />
+                        ) : pythonStatus[proj]?.running ? (
+                          <Square size={13} />
+                        ) : (
+                          <Play size={13} />
+                        )}
+                      </button>
+                    )}
+                    {composeStatus[proj]?.has_compose && (
+                      <button
+                        className="tree-action-btn project-btn"
+                        onClick={(e) => toggleCompose(proj, e)}
+                        disabled={loadingCompose[proj]}
+                        title={composeStatus[proj]?.running ? "Stop containers (docker compose down)" : "Build & Start containers (docker compose up -d)"}
+                        style={{
+                          color: composeStatus[proj]?.running ? '#22c55e' : 'var(--text-muted)'
+                        }}
+                      >
+                        {loadingCompose[proj] ? (
+                          <Loader2 size={13} className="spin" />
+                        ) : composeStatus[proj]?.running ? (
+                          <Square size={13} />
+                        ) : (
+                          <Play size={13} />
+                        )}
+                      </button>
+                    )}
+                    <button
+                      className="tree-action-btn project-btn"
+                      onClick={(e) => handleOpenPreview(proj, e)}
+                      title={`Preview project "${proj}" (index.*)`}
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      <ExternalLink size={13} />
+                    </button>
                     <button
                       className="tree-action-btn project-btn"
                       onClick={(e) => toggleHideProject(proj, e)}

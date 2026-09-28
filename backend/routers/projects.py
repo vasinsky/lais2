@@ -1,10 +1,54 @@
+import subprocess
+import socket
+import json
+import os
+
+def get_compose_file_path(name: str) -> str | None:
+    root = os.environ.get("PROJECTS_ROOT_DIR", "/app/projects")
+    proj_dir = os.path.join(root, name)
+    for fname in ["docker-compose.yml", "docker-compose.yaml"]:
+        p = os.path.join(proj_dir, fname)
+        if os.path.isfile(p):
+            return p
+    return None
+
+import logging
+logger = logging.getLogger(__name__)
+
+def get_host_project_path(project_name: str):
+    try:
+        cid = socket.gethostname()
+        res = subprocess.run(
+            ["docker", "inspect", cid, "--format", "{{json .Mounts}}"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            mounts = json.loads(res.stdout.strip())
+            # Сначала ищем точное совпадение с папкой проектов
+            for m in mounts:
+                if m.get("Destination") == "/app/projects":
+                    return os.path.join(m.get("Source"), project_name)
+            # Запасной вариант: если /app смонтирован из корня репозитория
+            for m in mounts:
+                if m.get("Destination") == "/app":
+                    src = m.get("Source")
+                    # если /app указывает на папку backend, поднимаемся на уровень выше к корню
+                    if os.path.basename(src) == "backend":
+                        src = os.path.dirname(src)
+                    return os.path.join(src, "projects", project_name)
+    except Exception as exc:
+        logger.warning(f"Host path resolution error: {exc}")
+    return None
+
 import shutil
 from fastapi.responses import FileResponse
 import os
 import sys
 import datetime
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 import httpx
 
@@ -253,6 +297,67 @@ async def get_project_tree(name: str, subpath: Optional[str] = None):
     return build_tree(target_dir, rel_path=subpath if subpath else "")
 
 
+@router.get("/{name}/preview")
+@router.get("/{name}/preview/")
+@router.get("/{name}/preview/{file_path:path}")
+async def preview_project_file(name: str, file_path: str = ""):
+    from fastapi.responses import RedirectResponse
+
+    cur_ws = get_base_dir()
+    proj_dir = os.path.realpath(os.path.join(cur_ws, name))
+    if not os.path.isdir(proj_dir):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 1. Docker Compose: ищем опубликованный порт хоста
+    compose_names = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+    for c_name in compose_names:
+        c_path = os.path.join(proj_dir, c_name)
+        if os.path.isfile(c_path):
+            try:
+                with open(c_path, "r", encoding="utf-8") as cf:
+                    for line in cf:
+                        cleaned = line.strip().strip("-").strip().replace('"', '').replace("'", "")
+                        # Ищем строки формата 8080:80 или 127.0.0.1:8080:80
+                        if ":" in cleaned:
+                            parts = cleaned.split(":")
+                            if len(parts) >= 2:
+                                host_cand = parts[-2].split("/")[-1].strip()
+                                container_cand = parts[-1].split("/")[-0].strip()
+                                if host_cand.isdigit() and container_cand.isdigit():
+                                    return RedirectResponse(url=f"http://localhost:{host_cand}/")
+            except Exception:
+                pass
+
+    # 2. Обычный статический проект
+    target_path = os.path.realpath(os.path.join(proj_dir, file_path))
+    if not target_path.startswith(proj_dir):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if os.path.isdir(target_path):
+        subfolders_to_check = ["", "app", "public", "dist", "www", "build"]
+        found_index = None
+
+        for sub in subfolders_to_check:
+            check_dir = os.path.realpath(os.path.join(proj_dir, sub)) if sub else target_path
+            if os.path.isdir(check_dir):
+                candidates = [
+                    f for f in sorted(os.listdir(check_dir))
+                    if os.path.isfile(os.path.join(check_dir, f)) and f.lower().startswith("index.")
+                ]
+                if candidates:
+                    found_index = os.path.join(check_dir, candidates[0])
+                    break
+
+        if not found_index:
+            raise HTTPException(status_code=404, detail="No index.* file found in directory or known subdirectories")
+        target_path = found_index
+
+    if not os.path.isfile(target_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(target_path)
+
+
 @router.get("/{name}/raw-file")
 async def get_raw_file(name: str, path: str = Query(...)):
     cur_ws = get_base_dir()
@@ -479,5 +584,283 @@ async def delete_project(name: str):
         for k in keys_to_del:
             _file_history_store.pop(k, None)
         return {"status": "success", "deleted": name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# --- Python Process Manager ---
+_python_procs: dict[str, dict] = {}
+
+def _find_free_port(start_port=8050, max_port=8099):
+    for p in range(start_port, max_port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", p)) != 0:
+                return p
+    return 8050
+
+@router.get("/{name}/python/status")
+async def get_python_status(name: str):
+    cur_ws = get_base_dir()
+    proj_dir = os.path.realpath(os.path.join(cur_ws, name))
+    if not os.path.isdir(proj_dir):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    entry_file = None
+    for f in ["main.py", "app.py", "server.py", "run.py"]:
+        p = os.path.join(proj_dir, f)
+        if os.path.isfile(p):
+            entry_file = f
+            break
+
+    proc_info = _python_procs.get(name)
+    running = False
+    port = None
+
+    if proc_info:
+        proc = proc_info.get("process")
+        if proc and proc.poll() is None:
+            running = True
+            port = proc_info.get("port")
+        else:
+            _python_procs.pop(name, None)
+
+    return {
+        "has_python": entry_file is not None,
+        "entry_file": entry_file,
+        "running": running,
+        "port": port
+    }
+
+@router.post("/{name}/python/start")
+async def start_python_project(name: str):
+    cur_ws = get_base_dir()
+    proj_dir = os.path.realpath(os.path.join(cur_ws, name))
+    if not os.path.isdir(proj_dir):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    proc_info = _python_procs.get(name)
+    if proc_info and proc_info.get("process") and proc_info["process"].poll() is None:
+        return {"status": "already_running", "port": proc_info.get("port")}
+
+    entry_file = None
+    for f in ["main.py", "app.py", "server.py", "run.py"]:
+        p = os.path.join(proj_dir, f)
+        if os.path.isfile(p):
+            entry_file = f
+            break
+
+    if not entry_file:
+        raise HTTPException(status_code=400, detail="No Python entrypoint found (main.py, app.py, server.py)")
+
+    # Проверяем, указан ли жесткий порт внутри файла скрипта
+    entry_path = os.path.join(proj_dir, entry_file)
+    with open(entry_path, "r", encoding="utf-8", errors="ignore") as f:
+        src = f.read()
+
+    port = None
+    import re as _re
+    m = _re.search(r"port\s*=\s*(\d{2,5})", src)
+    if m:
+        port = int(m.group(1))
+    else:
+        port = _find_free_port()
+
+    env = os.environ.copy()
+    env["PORT"] = str(port)
+    env["PYTHONUNBUFFERED"] = "1"
+
+    # Запускаем подпроцесс
+    log_file = open(os.path.join(proj_dir, ".python_run.log"), "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, entry_file],
+        cwd=proj_dir,
+        env=env,
+        stdout=log_file,
+        stderr=subprocess.STDOUT
+    )
+
+    _python_procs[name] = {
+        "process": proc,
+        "port": port,
+        "log_file": log_file
+    }
+
+    return {"status": "started", "port": port, "pid": proc.pid}
+
+@router.post("/{name}/python/stop")
+async def stop_python_project(name: str):
+    proc_info = _python_procs.get(name)
+    if not proc_info or not proc_info.get("process"):
+        return {"status": "not_running"}
+
+    proc = proc_info["process"]
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    log_file = proc_info.get("log_file")
+    if log_file and not log_file.closed:
+        try:
+            log_file.close()
+        except Exception:
+            pass
+
+    _python_procs.pop(name, None)
+    return {"status": "stopped"}
+
+
+@router.api_route("/{name}/python/proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
+async def python_project_proxy(name: str, path: str, request: Request):
+    proc_info = _python_procs.get(name)
+    if not proc_info or not proc_info.get("process") or proc_info["process"].poll() is not None:
+        raise HTTPException(status_code=503, detail="Python project server is not running. Please start it first.")
+
+    port = proc_info.get("port")
+    target_url = f"http://127.0.0.1:{port}/{path}"
+    if request.url.query:
+        target_url += f"?{request.url.query}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            req_content = await request.body()
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=req_content,
+                timeout=30.0
+            )
+            
+            from fastapi.responses import Response
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers)
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
+
+
+@router.get("/{name}/compose/status")
+async def get_compose_status(name: str):
+    cur_ws = get_base_dir()
+    proj_dir = os.path.realpath(os.path.join(cur_ws, name))
+    if not os.path.isdir(proj_dir):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    compose_file = None
+    for f in ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]:
+        p = os.path.join(proj_dir, f)
+        if os.path.isfile(p):
+            compose_file = p
+            break
+
+    if not compose_file:
+        return {"has_compose": False, "running": False, "port": None}
+
+    try:
+        res = subprocess.run(
+            ["docker", "compose", "-f", compose_file, "ps", "--format", "json"],
+            cwd=proj_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5
+        )
+        running = False
+        port = None
+        if res.returncode == 0 and res.stdout.strip():
+            running = True
+            try:
+                for line in res.stdout.strip().splitlines():
+                    if not line.strip():
+                        continue
+                    cdata = json.loads(line)
+                    publishers = cdata.get("Publishers") or []
+                    for pub in publishers:
+                        pub_port = pub.get("PublishedPort")
+                        if pub_port:
+                            port = pub_port
+                            break
+                    if port:
+                        break
+            except Exception:
+                pass
+
+        if not port:
+            try:
+                with open(compose_file, "r", encoding="utf-8") as cf:
+                    ccontent = cf.read()
+                import re as _re
+                m = _re.search(r"(\d{2,5}):\d+", ccontent)
+                if m:
+                    port = int(m.group(1))
+            except Exception:
+                pass
+
+        return {"has_compose": True, "running": running, "port": port}
+    except Exception:
+        return {"has_compose": True, "running": False, "port": None}
+
+@router.post("/{name}/compose/up")
+async def compose_up(name: str):
+    proj_dir = os.path.join(os.environ.get("PROJECTS_ROOT_DIR", "/app/projects"), name)
+    compose_file = get_compose_file_path(name)
+    if not compose_file:
+        raise HTTPException(status_code=404, detail="docker-compose.yml not found")
+    try:
+        host_dir = get_host_project_path(name)
+        cmd = ["docker", "compose", "-f", compose_file]
+        if host_dir:
+            cmd.extend(["--project-directory", host_dir])
+        cmd.extend(["up", "-d"])
+        res = subprocess.run(
+            cmd,
+            cwd=proj_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60
+        )
+        if res.returncode != 0:
+            raise HTTPException(status_code=500, detail=res.stderr or "Failed to start containers")
+        return {"status": "started", "output": res.stdout}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{name}/compose/down")
+async def compose_down(name: str):
+    proj_dir = os.path.join(os.environ.get("PROJECTS_ROOT_DIR", "/app/projects"), name)
+    compose_file = get_compose_file_path(name)
+    if not compose_file:
+        raise HTTPException(status_code=404, detail="docker-compose.yml not found")
+    try:
+        host_dir = get_host_project_path(name)
+        cmd = ["docker", "compose", "-f", compose_file]
+        if host_dir:
+            cmd.extend(["--project-directory", host_dir])
+        cmd.extend(["down"])
+        res = subprocess.run(
+            cmd,
+            cwd=proj_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30
+        )
+        if res.returncode != 0:
+            raise HTTPException(status_code=500, detail=res.stderr or "Failed to stop containers")
+        return {"status": "stopped", "output": res.stdout}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
