@@ -271,7 +271,7 @@ class CreateProjectPayload(BaseModel):
 @router.post("/")
 async def create_new_project(payload: CreateProjectPayload):
     proj_name = payload.name.strip().strip("/")
-    if not proj_name or ".." in proj_name or "/" in proj_name or "\" in proj_name:
+    if not proj_name or ".." in proj_name or "/" in proj_name or "\\" in proj_name:
         raise HTTPException(status_code=400, detail="Invalid project name")
     
     base_dir = get_base_dir()

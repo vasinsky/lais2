@@ -625,20 +625,24 @@ export default function RightPanel({
                 onMouseLeave={() => setHoveredMsgIdx(null)}
                 style={{
                   display: 'flex',
-                  flexDirection: 'column',
+                  flexDirection: isUser ? 'row-reverse' : 'row',
+                  alignItems: 'flex-start',
+                  gap: 6,
                   alignSelf: isUser ? 'flex-end' : 'flex-start',
-                  maxWidth: '88%',
-                  position: 'relative'
+                  maxWidth: '92%'
                 }}
               >
+                {/* Bubble */}
                 <div style={{
                   padding: '8px 12px',
                   borderRadius: 8,
                   fontSize: 12.5,
                   lineHeight: 1.45,
-                  background: isUser ? 'var(--primary-color, #2563eb)' : 'var(--bg-card, #1e293b)',
-                  color: isUser ? '#ffffff' : 'var(--text-main)',
-                  border: isUser ? 'none' : '1px solid var(--border-color)'
+                  background: isUser ? 'var(--primary-color, #2563eb)' : 'var(--bg-card, #ffffff)',
+                  color: isUser ? '#ffffff' : 'var(--text-main, #0f172a)',
+                  border: isUser ? 'none' : '1px solid var(--border-color, #e2e8f0)',
+                  wordBreak: 'break-word',
+                  boxShadow: isUser ? 'none' : '0 1px 2px rgba(0,0,0,0.05)'
                 }}>
                   {renderMessageContent(msg.content)}
 
@@ -689,54 +693,54 @@ export default function RightPanel({
                   )}
                 </div>
 
-                {/* Message Hover Actions */}
-                {hoveredMsgIdx === idx && (
-                  <div style={{
-                    position: 'absolute',
-                    top: 4,
-                    right: 6,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    background: isUser ? 'rgba(0, 0, 0, 0.45)' : 'var(--bg-panel)',
-                    padding: '2px 5px',
-                    borderRadius: 4,
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
-                    border: '1px solid var(--border-color)',
-                    zIndex: 20
-                  }}>
-                    <button
-                      onClick={() => handleCopyText(msg.content, `msg-${idx}`)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: isUser ? '#ffffff' : 'var(--text-muted)',
-                        padding: 3,
-                        display: 'inline-flex',
-                        alignItems: 'center'
-                      }}
-                      title="Copy message"
-                    >
-                      {copiedCodeIdx === `msg-${idx}` ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteMessage(idx)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: isUser ? '#ff8080' : 'var(--text-muted)',
-                        padding: 3,
-                        display: 'inline-flex',
-                        alignItems: 'center'
-                      }}
-                      title="Delete message"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                )}
+                {/* Side Hover Actions (never overlaps text) */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  padding: '2px 4px',
+                  borderRadius: 6,
+                  background: 'var(--bg-card, #ffffff)',
+                  border: '1px solid var(--border-color, #e2e8f0)',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.08)',
+                  opacity: hoveredMsgIdx === idx ? 1 : 0,
+                  pointerEvents: hoveredMsgIdx === idx ? 'auto' : 'none',
+                  transition: 'opacity 0.15s ease',
+                  marginTop: 2
+                }}>
+                  <button
+                    onClick={() => handleCopyText(msg.content, `msg-${idx}`)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted, #64748b)',
+                      padding: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Copy message"
+                  >
+                    {copiedCodeIdx === `msg-${idx}` ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMessage(idx)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted, #64748b)',
+                      padding: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Delete message"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
             );
           })
