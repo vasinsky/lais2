@@ -222,6 +222,11 @@ export default function ProjectTree({
     }
   };
 
+  const openCreateProjectModal = () => {
+    setModalInputVal('');
+    setModal({ type: 'create-project', projName: '' });
+  };
+
   const openCreateModal = (type: 'create-file' | 'create-folder') => {
     if (!activeProject) {
       showToast('Please select a project first', 'warning');
@@ -249,6 +254,30 @@ export default function ProjectTree({
   const handleModalSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!modal) return;
+
+    if (modal.type === 'create-project') {
+      const projName = modalInputVal.trim();
+      if (!projName) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/projects`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: projName })
+        });
+        if (res.ok) {
+          showToast(`Project "${projName}" created`, 'success');
+          await fetchProjects();
+          onSelectProject(projName);
+          closeModal();
+        } else {
+          const err = await res.json();
+          showToast(err.detail || 'Failed to create project', 'error');
+        }
+      } catch {
+        showToast('Error creating project', 'error');
+      }
+      return;
+    }
 
     if (modal.type === 'create-file') {
       const filename = modalInputVal.trim();
@@ -523,6 +552,14 @@ export default function ProjectTree({
             </>
           )}
 
+                    <button
+            onClick={openCreateProjectModal}
+            className="theme-toggle-btn"
+            style={{ padding: 4 }}
+            title="New project directory"
+          >
+            <FolderPlus size={13} />
+          </button>
           <button
             onClick={() => setShowHidden(prev => !prev)}
             className="theme-toggle-btn"
@@ -553,10 +590,30 @@ export default function ProjectTree({
       {/* Projects List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
         {visibleProjects.length === 0 ? (
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 20 }}>
-            {projects.length > 0 && !showHidden 
-              ? 'All projects are hidden' 
-              : 'No projects in workspace'}
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <div>
+              {projects.length > 0 && !showHidden 
+                ? 'All projects are hidden' 
+                : 'No projects in workspace'}
+            </div>
+            <button
+              onClick={openCreateProjectModal}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 4,
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-panel)',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                fontSize: 11.5
+              }}
+            >
+              <FolderPlus size={13} />
+              New Project
+            </button>
           </div>
         ) : (
           visibleProjects.map((proj) => {

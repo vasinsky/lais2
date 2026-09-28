@@ -32,43 +32,147 @@ def init_project_structure(*args, **kwargs) -> str:
         else:
             proj_name = first
             proj_dir = os.path.join(get_base_dir(), proj_name)
-        proj_type = args[1] if len(args) > 1 else kwargs.get("template", "generic")
+        proj_type = args[1] if len(args) > 1 else kwargs.get("proj_type", kwargs.get("template", "static"))
     else:
-        proj_name = kwargs.get("project_name", "project")
-        proj_dir = kwargs.get("proj_path", os.path.join(get_base_dir(), proj_name))
-        proj_type = kwargs.get("template", "generic")
+        proj_name = kwargs.get("project_name", kwargs.get("proj_name", "project"))
+        proj_dir = kwargs.get("proj_path", kwargs.get("proj_dir", os.path.join(get_base_dir(), proj_name)))
+        proj_type = kwargs.get("proj_type", kwargs.get("template", "static"))
 
     os.makedirs(proj_dir, exist_ok=True)
     files = kwargs.get("files")
     if isinstance(files, dict):
-        for rel_path, content in files.items():
+        for rel_path, c in files.items():
             full_p = os.path.join(proj_dir, rel_path)
             os.makedirs(os.path.dirname(full_p), exist_ok=True)
             with open(full_p, "w", encoding="utf-8") as f:
-                f.write(content)
+                f.write(c)
         return proj_dir
 
-    readme_path = os.path.join(proj_dir, "README.md")
-    if not os.path.exists(readme_path):
-        with open(readme_path, "w", encoding="utf-8") as f:
-            f.write(f"# {proj_name}\n\nProject created in Local AI Studio.\n")
+    if proj_type == "static":
+        css_dir = os.path.join(proj_dir, "css")
+        js_dir = os.path.join(proj_dir, "js")
+        images_dir = os.path.join(proj_dir, "images")
+        os.makedirs(css_dir, exist_ok=True)
+        os.makedirs(js_dir, exist_ok=True)
+        os.makedirs(images_dir, exist_ok=True)
 
-    if proj_type == "docker":
-        dc_path = os.path.join(proj_dir, "docker-compose.yml")
-        if not os.path.exists(dc_path):
-            with open(dc_path, "w", encoding="utf-8") as f:
-                f.write("version: '3.8'\nservices:\n  app:\n    image: alpine\n    command: sleep infinity\n")
+        index_file = os.path.join(proj_dir, "index.html")
+        if not os.path.exists(index_file):
+            with open(index_file, "w", encoding="utf-8") as f:
+                f.write("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>""" + proj_name + """</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Welcome to """ + proj_name + """</h1>
+    </header>
+    <main>
+        <p>Project initialized successfully.</p>
+    </main>
+    <script src="js/script.js"></script>
+</body>
+</html>
+""")
+
+        css_file = os.path.join(css_dir, "style.css")
+        if not os.path.exists(css_file):
+            with open(css_file, "w", encoding="utf-8") as f:
+                f.write("""* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    background-color: #0f172a;
+    color: #f8fafc;
+    padding: 2rem;
+}
+
+header {
+    margin-bottom: 2rem;
+}
+
+h1 {
+    color: #38bdf8;
+}
+""")
+
+        js_file = os.path.join(js_dir, "script.js")
+        if not os.path.exists(js_file):
+            with open(js_file, "w", encoding="utf-8") as f:
+                f.write("""document.addEventListener("DOMContentLoaded", () => {
+    console.log("Project initialized");
+});
+""")
+        return proj_dir
+
+    elif proj_type == "docker":
+        app_dir = os.path.join(proj_dir, "app")
+        os.makedirs(app_dir, exist_ok=True)
+
+        app_index = os.path.join(app_dir, "index.html")
+        if not os.path.exists(app_index):
+            with open(app_index, "w", encoding="utf-8") as f:
+                f.write("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>""" + proj_name + """ - Nginx App</title>
+</head>
+<body>
+    <h1>Docker Nginx Service</h1>
+    <p>Served from """ + proj_name + """/app via containerized Nginx.</p>
+</body>
+</html>
+""")
+
+        compose_file = os.path.join(proj_dir, "docker-compose.yml")
+        if not os.path.exists(compose_file):
+            with open(compose_file, "w", encoding="utf-8") as f:
+                f.write("""services:
+  web:
+    image: nginx:alpine
+    container_name: """ + proj_name + """_web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./app:/usr/share/nginx/html:ro
+""")
+        return proj_dir
+
     elif proj_type == "python":
-        main_py = os.path.join(proj_dir, "main.py")
-        if not os.path.exists(main_py):
-            with open(main_py, "w", encoding="utf-8") as f:
-                f.write('print("Hello from Local AI Studio!")\n')
-        req_txt = os.path.join(proj_dir, "requirements.txt")
-        if not os.path.exists(req_txt):
-            with open(req_txt, "w", encoding="utf-8") as f:
-                f.write("# requirements\n")
+        main_file = os.path.join(proj_dir, "main.py")
+        if not os.path.exists(main_file):
+            with open(main_file, "w", encoding="utf-8") as f:
+                f.write("""def main():
+    print("Welcome to """ + proj_name + """")
+
+
+if __name__ == "__main__":
+    main()
+""")
+
+        req_file = os.path.join(proj_dir, "requirements.txt")
+        if not os.path.exists(req_file):
+            with open(req_file, "w", encoding="utf-8") as f:
+                f.write("""requests>=2.31.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+""")
+        return proj_dir
 
     return proj_dir
+
 
 @router.get("", response_model=List[str])
 @router.get("/", response_model=List[str])
@@ -158,6 +262,28 @@ class SaveFileRequest(BaseModel):
     path: str
     content: str
     source: str = "manual_save"
+
+
+class CreateProjectPayload(BaseModel):
+    name: str
+
+@router.post("")
+@router.post("/")
+async def create_new_project(payload: CreateProjectPayload):
+    proj_name = payload.name.strip().strip("/")
+    if not proj_name or ".." in proj_name or "/" in proj_name or "\" in proj_name:
+        raise HTTPException(status_code=400, detail="Invalid project name")
+    
+    base_dir = get_base_dir()
+    proj_dir = os.path.realpath(os.path.join(base_dir, proj_name))
+    if not proj_dir.startswith(os.path.realpath(base_dir)):
+        raise HTTPException(status_code=400, detail="Invalid path traversal")
+    
+    if os.path.exists(proj_dir):
+        raise HTTPException(status_code=409, detail=f"Project '{proj_name}' already exists")
+    
+    os.makedirs(proj_dir, exist_ok=True)
+    return {"status": "success", "project": proj_name}
 
 @router.post("/{name}/file")
 async def save_file_content(name: str, payload: SaveFileRequest):

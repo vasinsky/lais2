@@ -301,8 +301,19 @@ export default function RightPanel({
                     return next;
                   });
                 } else if (parsed.type === 'project_created') {
-                  onProjectCreatedFromChat(parsed.project, parsed.default_file);
+                  const targetProj = parsed.project_name || parsed.project;
+                  onProjectCreatedFromChat(targetProj, parsed.default_file);
                   onRefreshProjectTree?.();
+                  if (targetProj) {
+                    fetch(`${API_BASE_URL}/agent/${encodeURIComponent(targetProj)}/history`)
+                      .then(res => res.json())
+                      .then(data => {
+                        if (Array.isArray(data) && data.length > 0) {
+                          setMessages(data);
+                        }
+                      })
+                      .catch(() => {});
+                  }
                 }
               } catch {
                 // ignore
@@ -682,31 +693,47 @@ export default function RightPanel({
                 {hoveredMsgIdx === idx && (
                   <div style={{
                     position: 'absolute',
-                    top: -10,
-                    right: isUser ? 'auto' : 4,
-                    left: isUser ? 4 : 'auto',
+                    top: 4,
+                    right: 6,
                     display: 'flex',
+                    alignItems: 'center',
                     gap: 3,
-                    background: 'var(--bg-panel)',
-                    padding: '2px 4px',
+                    background: isUser ? 'rgba(0, 0, 0, 0.45)' : 'var(--bg-panel)',
+                    padding: '2px 5px',
                     borderRadius: 4,
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
                     border: '1px solid var(--border-color)',
-                    zIndex: 10
+                    zIndex: 20
                   }}>
                     <button
                       onClick={() => handleCopyText(msg.content, `msg-${idx}`)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
-                      title="Copy message text"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: isUser ? '#ffffff' : 'var(--text-muted)',
+                        padding: 3,
+                        display: 'inline-flex',
+                        alignItems: 'center'
+                      }}
+                      title="Copy message"
                     >
-                      {copiedCodeIdx === `msg-${idx}` ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+                      {copiedCodeIdx === `msg-${idx}` ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
                     </button>
                     <button
                       onClick={() => handleDeleteMessage(idx)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: isUser ? '#ff8080' : 'var(--text-muted)',
+                        padding: 3,
+                        display: 'inline-flex',
+                        alignItems: 'center'
+                      }}
                       title="Delete message"
                     >
-                      <Trash2 size={11} />
+                      <Trash2 size={12} />
                     </button>
                   </div>
                 )}

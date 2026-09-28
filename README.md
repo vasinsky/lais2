@@ -20,12 +20,48 @@ Local AI Studio is a self-hosted workspace combining local Large Language Models
 
 ### Architecture & Key Features
 - **Decoupled Containerization:** Microservices architecture with FastAPI (backend), React/Vite (frontend), and MongoDB (mongo) managed by Docker Compose.
+- **Embedded Web Terminal:** Interactive bottom terminal powered by `xterm.js` and WebSocket PTY sessions with dynamic project working directory synchronization (`projects/<active-project>`) and native Git support.
+- **Instant Chat-Driven Project Scaffolding:** Create structured projects directly through natural language chat commands or manually via the project tree.
 - **Agentic Code Generation & Editing:** Autonomous LLM-driven file manipulation, project tree navigation, and code history revision tracking with snapshot recovery.
 - **Integrated Image Pipeline:** Prompt-to-image workflow directly within the workspace with built-in asset storage and base64 hover previews.
 - **Configurable Workspace Paths:** Dynamic host-to-container volume mapping for workspace projects.
 - **Context Isolation & Overflow Protection:** Dual-layer memory architecture: MongoDB preserves 100% of historical messages and Base64 media, while the inference context window dynamically suppresses historical image payloads and uses a 16,384-token sliding window (`num_ctx: 16384`) to prevent context exhaustion.
 
 ---
+
+
+---
+
+### Project Scaffolding via Chat & Tree Navigation
+You can scaffold projects on the fly using natural language commands in the Global Chat (English or Russian), or create directories manually using the **New Project** button in the sidebar:
+
+- **Static Web Project:**
+  - *Trigger prompts:* `create static project <name>`, `создай статичный проект <имя>`
+  - *Generated structure:*
+    - `index.html` (semantic HTML5 boilerplate with stylesheet and script links)
+    - `images/` (empty directory for visual assets)
+    - `css/style.css` (modern reset and dark theme starter styling)
+    - `js/script.js` (DOM initialization listener)
+- **Docker Compose Project:**
+  - *Trigger prompts:* `create docker project <name>`, `создай докер проект <имя>`
+  - *Generated structure:*
+    - `app/index.html` (sample web document)
+    - `docker-compose.yml` (production-ready `nginx:alpine` container with port `8080:80` and `./app` volume mount)
+- **Python Project:**
+  - *Trigger prompts:* `create python project <name>`, `создай пайтон проект <имя>`
+  - *Generated structure:*
+    - `main.py` (`def main():` entrypoint)
+    - `requirements.txt` (standard dependencies: `requests`, `pydantic`, `python-dotenv`)
+
+All template files are generated strictly in English with immediate context initialization in the Project Agent tab.
+
+---
+
+### Embedded PTY Terminal
+The bottom drawer features an interactive terminal:
+- **xterm.js Integration:** Full VT100/ANSI terminal emulation with resize support and real-time PTY communication over WebSockets.
+- **Dynamic CWD Sync:** Automatically switches directories to `projects/<selected-project>` upon project selection.
+- **Pre-installed Tooling:** Includes native `git`, shell utilities, and container inspection tools.
 
 ### Prerequisites & External Services
 
@@ -110,12 +146,48 @@ Local AI Studio — это локальная среда разработки и
 
 ### Архитектура и функционал
 - **Полная контейнеризация:** Связка контейнеров FastAPI (backend), React/Vite (frontend) и MongoDB (mongo) под управлением Docker Compose.
+- **Встроенный веб-терминал:** Интерактивная консоль в нижней панели на базе `xterm.js` и WebSocket PTY с автоматической сменой рабочей директории под активный проект (`projects/<проект>`) и предустановленным Git.
+- **Генерация шаблонов проектов через чат:** Мгновенная инициализация типовых проектов прямо из переписки с ассистентом или создание папок вручную в дереве проектов.
 - **Агентное редактирование кода:** Чат-ассистент, способный анализировать контекст файлов, вносить изменения и фиксировать снимки истории (Revision History) с возможностью быстрого отката.
 - **Генерация визуальных ассетов:** Встроенный интерфейс генерации картинок через ComfyUI с автоматическим сохранением графики в выбранную папку активного проекта.
 - **Гибкое управление путями:** Путь к локальным проектам меняется строго через `.env` без правок в коде приложения.
 - **Двухуровневая защита контекста:** Разделение хранилища и инференса. MongoDB хранит 100% истории переписки и вложений, тогда как в контекстное окно Ollama передается динамическое скользящее окно с изоляцией тяжелых Base64-строк и расширенным лимитом токенов (`num_ctx: 16384`), предотвращая сбои переполнения памяти.
 
 ---
+
+
+---
+
+### Создание проектов через чат и файловое дерево
+Инициализировать новые проекты можно с помощью естественных команд в общем чате (на русском или английском языках), а также вручную кнопкой **«New Project»** в панели дерева файлов:
+
+- **Статичный веб-проект (Static):**
+  - *Команды в чате:* `создай статичный проект <имя>`, `create static project <name>`
+  - *Создаваемая структура файлов:*
+    - `index.html` (базовая семантическая разметка с подключением стилей и скриптов)
+    - `images/` (каталог для графики и ассетов)
+    - `css/style.css` (базовые стили и оформление темной темы)
+    - `js/script.js` (обработчик готовности DOM)
+- **Docker-проект (Nginx Web):**
+  - *Команды в чате:* `создай докер проект <имя>`, `create docker project <name>`
+  - *Создаваемая структура файлов:*
+    - `app/index.html` (стартовая веб-страница сервиса)
+    - `docker-compose.yml` (контейнер `nginx:alpine`, маппинг порта `8080:80` и монтирование тома `./app`)
+- **Python-проект (Python):**
+  - *Команды в чате:* `создай пайтон проект <имя>`, `create python project <name>`
+  - *Создаваемая структура файлов:*
+    - `main.py` (точка входа с функцией `main()`)
+    - `requirements.txt` (стандартный набор библиотек: `requests`, `pydantic`, `python-dotenv`)
+
+Все шаблоны и файлы генерируются строго на английском языке, а переписка и контекст агента подтягиваются автоматически.
+
+---
+
+### Интерактивный терминал (PTY)
+В нижней части рабочего пространства доступен полнофункциональный терминал:
+- **xterm.js и WebSocket:** Поддержка ANSI-цветов, копирования/вставки, автоподстройки размеров и прямого PTY-канала.
+- **Синхронизация рабочей папки:** При переключении проектов терминал автоматически открывает сессию в `projects/<название-проекта>`.
+- **Встроенные утилиты:** Внутри контейнера доступен `git` для коммитов и работы с ветками непосредственно из веб-интерфейса.
 
 ### Требования и интеграции
 
