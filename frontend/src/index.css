@@ -297,3 +297,11 @@ button:active,
     opacity: 1;
   }
 }
+
+.spin {
+  animation: studio-spin 1s linear infinite;
+}
+@keyframes studio-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

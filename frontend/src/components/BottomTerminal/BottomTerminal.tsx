@@ -32,11 +32,14 @@ export default function BottomTerminal({
   const wsRef = useRef<WebSocket | null>(null);
   const isDragging = useRef(false);
 
-  // Подписка на per-project логи
+  // Синхронизация истории логов при смене активного проекта и подписка на новые события
   useEffect(() => {
-    setLogs([...consoleLogger.getLogs(activeProject)]);
+    const current = consoleLogger.getLogs(activeProject);
+    setLogs([...current]);
+
     const unsubscribe = consoleLogger.subscribe(() => {
-      setLogs([...consoleLogger.getLogs(activeProject)]);
+      const updated = consoleLogger.getLogs(activeProject);
+      setLogs([...updated]);
     });
     return unsubscribe;
   }, [activeProject]);
@@ -136,12 +139,25 @@ export default function BottomTerminal({
   }, [mode, activeProject]);
 
   useEffect(() => {
+    let timer: any = null;
     if (!isCollapsed && activeTab === 'terminal') {
-      setTimeout(() => initTerminal(), 50);
+      timer = setTimeout(() => initTerminal(), 60);
     }
     return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (xtermInstance.current) xtermInstance.current.dispose();
+      if (timer) clearTimeout(timer);
+      if (wsRef.current) {
+        // Закрываем только если соединение уже установилось
+        if (wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.close();
+        } else if (wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.onopen = () => wsRef.current?.close();
+        }
+        wsRef.current = null;
+      }
+      if (xtermInstance.current) {
+        xtermInstance.current.dispose();
+        xtermInstance.current = null;
+      }
     };
   }, [initTerminal, isCollapsed, activeTab]);
 
@@ -351,7 +367,7 @@ export default function BottomTerminal({
                       }`
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
                       <span style={{ color: '#8b949e', fontSize: 11 }}>[{log.timestamp}]</span>
                       <span
                         style={{
@@ -361,10 +377,18 @@ export default function BottomTerminal({
                               ? '#f85149'
                               : log.type === 'response'
                               ? '#2ea043'
+                              : log.type === 'info'
+                              ? '#a371f7'
                               : '#388bfd'
                         }}
                       >
-                        {log.type === 'request' ? '→ REQ' : log.type === 'response' ? '← RES' : '✖ ERR'}
+                        {log.type === 'request'
+                          ? '→ REQ'
+                          : log.type === 'response'
+                          ? '← RES'
+                          : log.type === 'info'
+                          ? 'ℹ INFO'
+                          : '✖ ERR'}
                       </span>
                       <span style={{ color: '#e6edf3', fontWeight: 500 }}>
                         {log.method} {log.url}
@@ -390,11 +414,15 @@ export default function BottomTerminal({
                       <pre
                         style={{
                           margin: 0,
-                          padding: '4px 6px',
+                          padding: '6px 8px',
                           background: 'rgba(0,0,0,0.3)',
-                          borderRadius: 3,
+                          borderRadius: 4,
                           fontSize: 11,
-                          overflowX: 'auto',
+                          lineHeight: 1.45,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          overflowX: 'hidden',
                           color: '#8b949e'
                         }}
                       >

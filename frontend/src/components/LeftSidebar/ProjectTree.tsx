@@ -130,6 +130,16 @@ export default function ProjectTree({
       payload: { action, target: "python-process" }
     });
 
+    if (action === "start") {
+      consoleLogger.log({
+        project: projName,
+        type: "info",
+        method: "ENV",
+        url: "venv & pip setup",
+        payload: { message: "Preparing .venv, checking dependencies, and starting process..." }
+      });
+    }
+
     try {
       const res = await fetch(targetUrl, { method: "POST" });
       const durationMs = Date.now() - startTime;
@@ -826,7 +836,7 @@ export default function ProjectTree({
                         }}
                       >
                         {loadingPython[proj] ? (
-                          <span className="spinner-border spinner-border-sm" style={{ width: 12, height: 12 }} />
+                          <Loader2 size={13} className="spin" />
                         ) : pythonStatus[proj]?.running ? (
                           <Square size={13} />
                         ) : (

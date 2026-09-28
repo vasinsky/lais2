@@ -671,10 +671,85 @@ async def start_python_project(name: str):
     env["PORT"] = str(port)
     env["PYTHONUNBUFFERED"] = "1"
 
-    # Запускаем подпроцесс
-    log_file = open(os.path.join(proj_dir, ".python_run.log"), "w", encoding="utf-8")
+    log_path = os.path.join(proj_dir, ".python_run.log")
+    log_file = open(log_path, "a", encoding="utf-8")
+
+    # Изолированное виртуальное окружение для проекта
+    venv_dir = os.path.join(proj_dir, ".venv")
+    venv_python = os.path.join(venv_dir, "bin", "python")
+    venv_pip = os.path.join(venv_dir, "bin", "pip")
+    setup_logs = []
+
+    if not os.path.isfile(venv_python):
+        msg = "[studio] Creating isolated virtual environment (.venv)..."
+        log_file.write(msg + "\n")
+        log_file.flush()
+        setup_logs.append(msg)
+
+        res = subprocess.run([sys.executable, "-m", "venv", venv_dir], cwd=proj_dir, capture_output=True, text=True)
+        if res.stdout:
+            log_file.write(res.stdout + "\n")
+            setup_logs.append(res.stdout.strip())
+        if res.returncode != 0:
+            err_msg = res.stderr or "Unknown venv creation error"
+            log_file.write(err_msg + "\n")
+            log_file.close()
+            raise HTTPException(status_code=500, detail=f"Failed to initialize .venv: {err_msg}")
+        setup_logs.append("[studio] Virtual environment successfully created.")
+
+    # Проверка и установка requirements.txt при наличии изменений
+    req_path = os.path.join(proj_dir, "requirements.txt")
+    if os.path.isfile(req_path):
+        import hashlib
+        with open(req_path, "rb") as rf:
+            cur_hash = hashlib.md5(rf.read()).hexdigest()
+        
+        hash_file = os.path.join(venv_dir, ".reqs_hash")
+        prev_hash = None
+        if os.path.isfile(hash_file):
+            try:
+                with open(hash_file, "r", encoding="utf-8") as hf:
+                    prev_hash = hf.read().strip()
+            except Exception:
+                pass
+
+        if cur_hash != prev_hash:
+            msg = "[studio] Installing / updating dependencies from requirements.txt..."
+            log_file.write(msg + "\n")
+            log_file.flush()
+            setup_logs.append(msg)
+
+            pip_env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+            pip_res = subprocess.run(
+                [venv_pip, "install", "--isolated", "--no-cache-dir", "-r", "requirements.txt"],
+                cwd=proj_dir,
+                env=pip_env,
+                capture_output=True,
+                text=True
+            )
+
+            if pip_res.returncode == 0:
+                try:
+                    with open(hash_file, "w", encoding="utf-8") as hf:
+                        hf.write(cur_hash)
+                except Exception:
+                    pass
+                setup_logs.append("[studio] Dependencies installed successfully.")
+            else:
+                warn_msg = pip_res.stderr or "pip install warning"
+                log_file.write(warn_msg + "\n")
+                setup_logs.append(f"[studio] Pip error/warning: {warn_msg.strip()}")
+        else:
+            setup_logs.append("[studio] Dependencies are up to date (cached).")
+
+    # Запускаем скрипт изолированным интерпретатором
+    start_msg = f"[studio] Starting {entry_file} on port {port}..."
+    log_file.write(start_msg + "\n")
+    log_file.flush()
+    setup_logs.append(start_msg)
+
     proc = subprocess.Popen(
-        [sys.executable, entry_file],
+        [venv_python, entry_file],
         cwd=proj_dir,
         env=env,
         stdout=log_file,
@@ -687,7 +762,12 @@ async def start_python_project(name: str):
         "log_file": log_file
     }
 
-    return {"status": "started", "port": port, "pid": proc.pid}
+    return {
+        "status": "started",
+        "port": port,
+        "pid": proc.pid,
+        "setup_log": "\n".join(setup_logs)
+    }
 
 @router.post("/{name}/python/stop")
 async def stop_python_project(name: str):

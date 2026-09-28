@@ -12,4 +12,4 @@ echo "=========================================="
 echo " [BACKEND] All tests passed! Starting server..."
 echo "=========================================="
 
-exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude "projects/*" --reload-exclude "*.venv*"

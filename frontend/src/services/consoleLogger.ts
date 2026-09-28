@@ -11,10 +11,33 @@ export interface LogEntry {
 }
 
 type Listener = () => void;
+const STORAGE_KEY = 'studio_console_logs';
+const MAX_LOGS_PER_PROJECT = 80;
 
 class ConsoleLogger {
   private logs: Record<string, LogEntry[]> = {};
   private listeners: Set<Listener> = new Set();
+
+  constructor() {
+    this.loadFromStorage();
+  }
+
+  private loadFromStorage() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY);
+      if (data) {
+        this.logs = JSON.parse(data);
+      }
+    } catch (_) {
+      this.logs = {};
+    }
+  }
+
+  private saveToStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.logs));
+    } catch (_) {}
+  }
 
   log(entry: Omit<LogEntry, 'id' | 'timestamp'>) {
     const id = Math.random().toString(36).substring(2, 9);
@@ -22,16 +45,17 @@ class ConsoleLogger {
     const proj = entry.project || 'general';
 
     const currentLogs = this.logs[proj] || [];
-    // Иммутабельное добавление — создаем НОВЫЙ массив, чтобы React видел изменение ссылки
-    this.logs[proj] = [
+    const updated = [
       ...currentLogs,
       {
         ...entry,
         id,
         timestamp
       }
-    ];
+    ].slice(-MAX_LOGS_PER_PROJECT); // храним последние 80 записей
 
+    this.logs[proj] = updated;
+    this.saveToStorage();
     this.notify();
   }
 
@@ -43,6 +67,7 @@ class ConsoleLogger {
   clearLogs(project: string | null) {
     const key = project || 'general';
     this.logs[key] = [];
+    this.saveToStorage();
     this.notify();
   }
 
@@ -54,7 +79,7 @@ class ConsoleLogger {
   }
 
   private notify() {
-    this.listeners.forEach(cb => cb());
+    this.listeners.forEach((cb) => cb());
   }
 }
 

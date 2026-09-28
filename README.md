@@ -56,6 +56,11 @@ You can scaffold projects on the fly using natural language commands in the Glob
   - `main.py` (`def main():` entrypoint or lightweight HTTP server listening to dynamic `os.environ["PORT"]`)
   - `requirements.txt` (standard dependencies: `requests`, `pydantic`, `python-dotenv`)
 - **Lifecycle & Execution:** Managed by the backend Process Manager (`POST /api/projects/{name}/python/start` and `stop`), executing in the background with dynamic port allocation (8050–8099).
+- **Automated Virtual Environment & Dependency Isolation:**
+  - Automatically provisions an isolated `.venv` inside the project folder using `--system-site-packages` (enabling seamless host SOCKS5 proxy compatibility via `PySocks`).
+  - Automatically runs `pip install -r requirements.txt` during startup.
+  - **MD5 Hash Caching:** Tracks changes via `.reqs_hash`. Dependencies are re-installed only when `requirements.txt` changes, keeping subsequent launches instantaneous (~30ms).
+  - **Diagnostic Output in Console:** Detailed step-by-step logs (environment provisioning, downloaded wheels, cache hits, or pip warnings) are streamed directly into the bottom **Console** tab under `setup_log`.
 
 ---
 
@@ -183,6 +188,11 @@ Local AI Studio — это локальная среда разработки и
   - `main.py` (точка входа или HTTP-сервер, слушающий порт из переменной окружения `os.environ.get("PORT")`)
   - `requirements.txt` (зависимости: `requests`, `pydantic`, `python-dotenv`)
 - **Запуск и остановка:** Управляются встроенным менеджером процессов бэкенда (`/api/projects/{name}/python/start` и `/stop`) с автоматическим выделением свободного порта из диапазона 8050–8099.
+- **Изолированное окружение и управление зависимостями:**
+  - Автоматически создает локальный `.venv` в директории проекта с флагом `--system-site-packages` (поддерживает работу через корпоративные/SOCKS5-прокси без сбоев `urllib3`).
+  - При старте сервиса автоматически выполняет установку библиотек: `.venv/bin/pip install -r requirements.txt`.
+  - **Кэширование по MD5-хешу:** Файл `.reqs_hash` отслеживает изменения. Повторные запуски происходят мгновенно (~30 мс) без повторных обращений к PyPI.
+  - **Логи установки в Консоли:** Все шаги подготовки окружения и вывод `pip install` транслируются в нижнюю вкладку **Console** в поле `setup_log`.
 
 ---
 
