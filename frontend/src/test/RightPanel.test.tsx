@@ -152,4 +152,38 @@ describe('RightPanel Component', () => {
     expect(copyBtn).toBeInTheDocument();
     expect(deleteBtn).toBeInTheDocument();
   });
+
+  it("renders diagnostics stats bar with messages, db size and context", async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (typeof url === "string" && url.includes("/stats")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ msg_count: 5, size_kb: 12.4 }),
+        });
+      }
+      if (typeof url === "string" && url.includes("/model-info")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ model: "qwen2.5-coder", context_length: 32768 }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([]),
+      });
+    });
+
+    render(
+      <ToastProvider>
+        <RightPanel {...defaultProps} />
+      </ToastProvider>
+    );
+
+    expect(await screen.findByText("Messages:")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("DB:")).toBeInTheDocument();
+    expect(screen.getByText("12.4 KB")).toBeInTheDocument();
+    expect(screen.getByText("Context:")).toBeInTheDocument();
+    expect(await screen.findByText("32k")).toBeInTheDocument();
+  });
 });

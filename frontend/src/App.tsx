@@ -3,6 +3,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import ProjectTree, { FileHistoryItem } from './components/LeftSidebar/ProjectTree';
 import CenterEditor from './components/CenterEditor/CenterEditor';
+import BottomTerminal from './components/BottomTerminal/BottomTerminal';
 import RightPanel from './components/RightPanel/RightPanel';
 import MemoryModal from './components/MemoryModal';
 import ImageModal from './components/ImageModal';
@@ -24,6 +25,27 @@ export default function App() {
   const [fileHistory, setFileHistory] = useState<FileHistoryItem[]>([]);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<FileHistoryItem | null>(null);
   const [treeRefreshTrigger, setTreeRefreshTrigger] = useState(0);
+
+  const [terminalHeight, setTerminalHeight] = useState<number>(() => {
+    const saved = localStorage.getItem('studio_terminal_height');
+    return saved ? parseInt(saved, 10) : 220;
+  });
+  const [isTerminalCollapsed, setIsTerminalCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('studio_terminal_collapsed') === 'true';
+  });
+
+  const handleTerminalHeightChange = (h: number) => {
+    setTerminalHeight(h);
+    localStorage.setItem('studio_terminal_height', h.toString());
+  };
+
+  const handleToggleTerminalCollapse = () => {
+    setIsTerminalCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('studio_terminal_collapsed', next.toString());
+      return next;
+    });
+  };
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('studio_theme') as 'light' | 'dark') || 'light';
@@ -182,16 +204,26 @@ export default function App() {
 
         <div className="resize-gutter" onMouseDown={startDragLeft} />
 
-        <div className="panel-card" style={{ flex: 1, minWidth: 300 }}>
-          <CenterEditor 
-            activeFile={activeFile}
+        <div className="panel-card" style={{ flex: 1, minWidth: 300, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 120, overflow: 'hidden' }}>
+            <CenterEditor 
+              activeFile={activeFile}
+              activeProject={activeProject}
+              theme={theme}
+              selectedHistoryItem={selectedHistoryItem}
+              overrideContent={activeFileContent}
+              onClearHistorySelection={() => setSelectedHistoryItem(null)}
+              onNewRevisionSaved={handleAddNewRevision}
+              onContentChange={(code) => setActiveFileContent(code)}
+            />
+          </div>
+          <BottomTerminal 
+            mode={chatMode}
             activeProject={activeProject}
-            theme={theme}
-            selectedHistoryItem={selectedHistoryItem}
-            overrideContent={activeFileContent}
-            onClearHistorySelection={() => setSelectedHistoryItem(null)}
-            onNewRevisionSaved={handleAddNewRevision}
-            onContentChange={(code) => setActiveFileContent(code)}
+            height={terminalHeight}
+            onHeightChange={handleTerminalHeightChange}
+            isCollapsed={isTerminalCollapsed}
+            onToggleCollapse={handleToggleTerminalCollapse}
           />
         </div>
 

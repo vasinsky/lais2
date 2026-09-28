@@ -2,7 +2,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import system, projects, chat, agent, prompts
+from routers import system, projects, chat, agent, prompts, terminal
 import database
 
 @asynccontextmanager
@@ -27,6 +27,7 @@ app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 app.include_router(prompts.router, prefix="/api/prompts", tags=["prompts"])
+app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
 
 @app.get("/health")
 def health_check():

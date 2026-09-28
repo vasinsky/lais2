@@ -1,3 +1,4 @@
+@import '@xterm/xterm/css/xterm.css';
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
