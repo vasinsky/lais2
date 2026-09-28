@@ -254,20 +254,19 @@ async def chat_stream(payload: ChatPayload):
             last_progress = {"step": 20, "total": 20, "percent": 100, "status": "Completed"}
 
             async for ev in generate_image_stream(sd_prompt, checkpoint):
-                yield {"data": json.dumps(ev)}
-                if ev.get("type") == "image_progress":
+                ev_type = ev.get("type")
+                if ev_type == "image_progress":
                     last_progress = {
                         "step": ev.get("step", 0),
                         "total": ev.get("total", 20),
                         "percent": ev.get("percent", 0),
                         "status": ev.get("status", "")
                     }
-                elif ev.get("type") == "image_complete":
+                    yield {"data": json.dumps({"type": "image_progress", "data": last_progress})}
+                elif ev_type == "image_complete":
                     final_img_url = ev.get("image_url")
                     raw_filename = ev.get("filename")
                     subfolder = ev.get("subfolder", "")
-                    
-                    # Скачиваем и сохраняем файл в папку generated_images
                     try:
                         save_dir = os.getenv("GENERATED_IMAGES_DIR", "/app/generated_images")
                         os.makedirs(save_dir, exist_ok=True)
@@ -282,9 +281,12 @@ async def chat_stream(payload: ChatPayload):
                                     f_out.write(r.content)
                     except Exception as err:
                         print(f"Error saving chat generated image: {err}")
-                elif ev.get("type") == "image_error":
+                    yield {"data": json.dumps({"type": "image_result", "url": final_img_url, "prompt": sd_prompt})}
+                elif ev_type == "image_error":
                     last_progress["status"] = ev.get("error", "Error")
-
+                    yield {"data": json.dumps(ev)}
+                else:
+                    yield {"data": json.dumps(ev)}
             # Сохранение полного сообщения со всеми артефактами в MongoDB
             if database.db is not None:
                 await database.db.chat_threads.update_one(

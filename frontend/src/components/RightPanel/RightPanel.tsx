@@ -295,7 +295,7 @@ export default function RightPanel({
                         ...next[lastIdx],
                         generated_image: parsed.url,
                         image_prompt: parsed.prompt,
-                        image_progress: undefined
+                        // keep progress visible
                       };
                     }
                     return next;
@@ -396,7 +396,7 @@ export default function RightPanel({
                         ...next[lastIdx],
                         generated_image: parsed.url,
                         image_prompt: parsed.prompt,
-                        image_progress: undefined
+                        // keep progress visible
                       };
                     }
                     return next;
@@ -629,7 +629,7 @@ export default function RightPanel({
                   alignItems: 'flex-start',
                   gap: 6,
                   alignSelf: isUser ? 'flex-end' : 'flex-start',
-                  maxWidth: '92%'
+                  maxWidth: (msg.image_progress || msg.generated_image) ? '100%' : '92%', width: (msg.image_progress || msg.generated_image) ? '100%' : 'auto'
                 }}
               >
                 {/* Bubble */}
@@ -642,19 +642,21 @@ export default function RightPanel({
                   color: isUser ? '#ffffff' : 'var(--text-main, #0f172a)',
                   border: isUser ? 'none' : '1px solid var(--border-color, #e2e8f0)',
                   wordBreak: 'break-word',
-                  boxShadow: isUser ? 'none' : '0 1px 2px rgba(0,0,0,0.05)'
+                  boxShadow: isUser ? 'none' : '0 1px 2px rgba(0,0,0,0.05)', width: (msg.image_progress || msg.generated_image) ? '100%' : 'auto', boxSizing: 'border-box'
                 }}>
                   {renderMessageContent(msg.content)}
 
                   {/* ComfyUI Progress Bar */}
                   {msg.image_progress && (
-                    <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: 'rgba(0,0,0,0.2)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                        <span>ComfyUI Execution</span>
-                        <span>{msg.image_progress.percent}%</span>
+                    <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', width: '100%', boxSizing: 'border-box' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>
+                        <span style={{ fontWeight: 600 }}>ComfyUI Execution</span>
+                        <span style={{ color: msg.image_progress.percent === 100 ? '#10b981' : 'inherit' }}>
+                          {msg.image_progress.percent}%
+                        </span>
                       </div>
-                      <div style={{ height: 4, width: '100%', background: 'rgba(255,255,255,0.2)', borderRadius: 2, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${msg.image_progress.percent}%`, background: '#10b981', transition: 'width 0.2s' }} />
+                      <div style={{ height: 6, width: '100%', background: 'rgba(255,255,255,0.15)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${msg.image_progress.percent}%`, background: '#10b981', transition: 'width 0.2s ease-out' }} />
                       </div>
                     </div>
                   )}
