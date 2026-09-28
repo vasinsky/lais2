@@ -19,6 +19,7 @@ VISION_MODEL = os.getenv("VISION_MODEL", "minicpm-v:latest")
 DEFAULT_CODER_MODEL = os.getenv("DEFAULT_CODER_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
 
 from comfy_service import generate_image_stream, COMFYUI_HTTP
+from routers.projects import get_base_dir
 
 
 def extract_custom_image_path(prompt: str) -> Optional[str]:
@@ -38,12 +39,16 @@ def detect_agent_image_prompt(text: str) -> Optional[str]:
     raw = text.strip()
     patterns = [
         r"(?:наполни|добавь|создай|сгенерируй|нарисуй).*?(?:картинк|фото|изображен|арт)[а-яA-Za-z0-9_\s]*?(?:про|с|:)?\s*(.*)",
-        r"(?:generate|create|draw|add).*?(?:image|picture|photo|asset)[a-zA-Z0-9_\s]*?(?:of|for|about|:)?\s*(.*)"
+        r"(?:generate|create|draw|add|make).*?(?:image|picture|photo|asset|render)[a-zA-Z0-9_\s]*?(?:of|for|about|:)?\s*(.*)",
+        r"^(?:нарисуй|отрисуй|сделай арт|изобрази|draw|sketch|paint|render)\s+(.*)",
+        r"(?:сгенерируй|создай|generate|create).*?\.(?:png|jpg|jpeg|webp)"
     ]
     for p in patterns:
         m = re.search(p, raw, re.IGNORECASE)
         if m:
-            desc = m.group(1).strip()
+            groups = m.groups()
+            desc = groups[0].strip() if groups and groups[0] else raw
+            desc = re.sub(r"(?:и\s+|and\s+)?(?:сохрани|положи|save|put|store).*$", "", desc, flags=re.IGNORECASE).strip()
             return desc if len(desc) > 3 else raw
     return None
 
@@ -138,33 +143,28 @@ async def execute_agent_task(task: AgentTask):
 
     file_tree = get_clean_project_files(proj_path)
 
-    write_patterns = [
-        r"(?:заполни|напиши|вставь|создай код для|перепиши)\s+([a-zA-Z0-9_\-\.\/]+)",
-        r"(?:fill|write|update)\s+([a-zA-Z0-9_\-\.\/]+)"
-    ]
-    target_match = None
-    for pattern in write_patterns:
-        m = re.search(pattern, lower_prompt)
-        if m:
-            target_match = m.group(1).strip()
-            break
-
     target_file = None
     ambiguous_files = []
+    # Проверяем прямое упоминание файлов из дерева в тексте запроса
+    mentioned_files = []
+    for f in file_tree:
+        base_f = os.path.basename(f).lower()
+        if base_f in lower_prompt or f.lower() in lower_prompt:
+            mentioned_files.append(f)
 
-    if target_match:
-        matched_candidates = []
-        for f in file_tree:
-            base_f = os.path.basename(f).lower()
-            if f.lower() == target_match.lower() or base_f == target_match.lower():
-                matched_candidates.append(f)
-
-        if len(matched_candidates) == 1:
-            target_file = matched_candidates[0]
-        elif len(matched_candidates) > 1:
-            ambiguous_files = matched_candidates
+    if len(mentioned_files) == 1:
+        # Ровно один файл - стримим напрямую в этот файл в редакторе
+        target_file = mentioned_files[0]
+    elif len(mentioned_files) > 1:
+        # Несколько файлов (например index.html И style.css) - мультифайловый режим через [FILE: ...]
+        target_file = None
     elif task.active_file_path and any(k in lower_prompt for k in ["этот файл", "текущий файл", "в файл", "в него"]):
         target_file = task.active_file_path
+    elif any(k in lower_prompt for k in ["наполни", "заполни", "сделай", "создай", "сайт"]):
+        for cand in ["index.html", "app/index.html", "main.py", "app.py"]:
+            if cand in file_tree:
+                target_file = cand
+                break
 
     if ambiguous_files:
         msg_reply = (
@@ -202,19 +202,23 @@ async def execute_agent_task(task: AgentTask):
             yield {"data": json.dumps({"type": "stream_target", "file_path": target_file})}
 
         async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
+            user_agent_prompt = task.prompt
             if task.images and len(task.images) > 0:
-                translated_prompt = await analyze_vision_to_english(task.prompt, task.images, client)
-            else:
-                translated_prompt = await translate_text_to_english(task.prompt, client)
+                try:
+                    vision_summary = await analyze_vision_to_english(task.prompt, task.images, client)
+                    user_agent_prompt = task.prompt + "\n\n[Visual Context]: " + str(vision_summary)
+                except Exception:
+                    pass
 
             if target_file:
                 system_instruction = (
-                    f"You are directly modifying the file '{target_file}' in project '{task.project_name}'.\n"
+                    f"You are directly editing the file '{target_file}' in project '{task.project_name}'.\n"
                     f"Global Directives:\n{global_rules_text}\n\n"
-                    "OUTPUT SPECIFICATION:\n"
-                    "1. Return ONLY the raw source code for this file.\n"
-                    "2. Do NOT output conversational chatter or markdown backticks.\n"
-                    "3. Complete and valid code from start to finish."
+                    "CRITICAL INSTRUCTIONS:\n"
+                    "1. Return ONLY the raw file source code.\n"
+                    "2. Do NOT write any greeting, introduction, conversational phrases, or explanations.\n"
+                    "3. Do NOT wrap code in markdown backticks (no ```html, no ```).\n"
+                    "4. Output complete, valid, high-quality production code from line 1 to the end."
                 )
             else:
                 system_instruction = (
@@ -223,19 +227,21 @@ async def execute_agent_task(task: AgentTask):
                     f"Project Files:\n{json.dumps(file_tree[:150], indent=2)}\n"
                     f"Active file: {task.active_file_path or 'None'}\n"
                     "Always converse and explain in fluent RUSSIAN.\n"
-                    "FILE GENERATION RULES:\n"
-                    "When creating or updating code files, you MUST wrap the complete code of each file in this exact tag format:\n"
+                    "CRITICAL FILE GENERATION INSTRUCTIONS:\n"
+                    "1. DO NOT write any introductory plan, conversational outline, or long descriptions.\n"
+                    "2. You MUST immediately start writing the files using this exact tag format:\n"
                     "[FILE: relative/path/to/filename.ext]\n"
-                    "code here\n"
+                    "complete code here\n"
                     "[/FILE]\n"
-                    "You can output multiple [FILE: ...]...[/FILE] blocks in one response (e.g. index.html, style.css).\n"
-                    "Provide a brief Russian explanation followed by the [FILE] blocks."
+                    "3. Each requested file (e.g. index.html, style.css) MUST have its own [FILE: ...] block.\n"
+                    "4. Put all CSS inside style.css and HTML inside index.html.\n"
+                    "5. After all [FILE] blocks are finished, write 1-2 summary sentences in Russian."
                 )
 
             dialog_history = [{"role": "system", "content": system_instruction}]
             for m in recent_messages:
                 dialog_history.append({"role": m["role"], "content": m["content"]})
-            dialog_history.append({"role": "user", "content": translated_prompt})
+            dialog_history.append({"role": "user", "content": user_agent_prompt})
 
             # --- 1. Проверяем необходимость генерации изображения ---
             # --- 1. Проверяем необходимость генерации изображения ---
@@ -284,6 +290,7 @@ async def execute_agent_task(task: AgentTask):
                                     generated_image_names.append(img_filename)
                                     yield {"data": json.dumps({
                                         "type": "file_saved",
+                                        "path": img_filename,
                                         "file_path": img_filename,
                                         "revision": {"content": f"[Binary image: {img_filename}]", "timestamp": "now"}
                                     })}
@@ -311,8 +318,14 @@ async def execute_agent_task(task: AgentTask):
             }
 
             current_file = target_file
-            open_tag_re = re.compile(r"\[FILE:\s*([^\]]+)\]|(?:###|#)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)")
-            close_tag_re = re.compile(r"\[/FILE\]|```", re.MULTILINE)
+            # Поддержка [FILE: path], ```ext:path, ### path, **path**, Файл `path`:
+            open_tag_re = re.compile(
+                r"\[FILE:\s*([^\]]+)\]|"
+                r"```[a-zA-Z0-9_+-]*\s*(?:<!--|/\*|//|#)?\s*([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)|"
+                r"(?:###|#|\*\*|`|(?:файл|file):?\s*`?)([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)",
+                re.IGNORECASE
+            )
+            close_tag_re = re.compile(r"\[/FILE\]|```\s*$", re.MULTILINE)
             
             raw_full_output = ""
             buf = ""
@@ -322,39 +335,112 @@ async def execute_agent_task(task: AgentTask):
                     yield {"data": json.dumps({"type": "stream_target", "file_path": current_file})}
 
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as resp:
+                    is_first_chunk = True
+                    in_closing_comment = False
+                    code_started = False
+                    prefix_buf = ""
+
+                    if target_file:
+                        yield {"data": json.dumps({"message": {"content": f"⚡ Редактирую файл `{target_file}`...\n"}})}
+
                     async for chunk in resp.aiter_lines():
                         if not chunk:
                             continue
                         try:
                             d = json.loads(chunk)
                             token = d.get("message", {}).get("content", "")
+                            if not token:
+                                continue
                             raw_full_output += token
 
                             if target_file:
-                                yield {"data": json.dumps({"message": {"content": token}})}
-                                continue
-
-                            buf += token
-                            if not current_file:
-                                m = open_tag_re.search(buf)
-                                if m:
-                                    fname = (m.group(1) or m.group(2)).strip().strip("/\\ ")
-                                    current_file = fname
-                                    yield {"data": json.dumps({"type": "stream_target", "file_path": current_file})}
-                                    buf = ""
-                                else:
-                                    if len(buf) > 40:
-                                        out_part = buf[:-20]
-                                        buf = buf[-20:]
-                                        yield {"data": json.dumps({"message": {"content": out_part}})}
-                            else:
-                                if close_tag_re.search(buf):
-                                    current_file = None
-                                    buf = ""
-                                else:
+                                # Если уже начался завершающий комментарий модели, отправляем его в чат
+                                if in_closing_comment:
                                     yield {"data": json.dumps({"message": {"content": token}})}
+                                    continue
+
+                                # Буферизуем первые токены для очистки от открывающих ```html / ```
+                                if not code_started:
+                                    prefix_buf += token
+                                    if len(prefix_buf) < 15 and ("`" in prefix_buf or "\n" in prefix_buf):
+                                        continue
+                                    clean_prefix = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", prefix_buf.lstrip())
+                                    prefix_buf = ""
+                                    code_started = True
+                                    if clean_prefix:
+                                        yield {"data": json.dumps({
+                                            "type": "stream_code",
+                                            "path": target_file,
+                                            "chunk": clean_prefix,
+                                            "is_start": is_first_chunk
+                                        })}
+                                        is_first_chunk = False
+                                    continue
+
+                                # Проверяем закрывающие ``` или начало русских пояснений
+                                if "```" in token or (("\n\n" in token or "\n" in token) and any(word in token.lower() for word in ["этот", "код", "файл", "данный", "мы ", "я "])):
+                                    parts = re.split(r"```", token, maxsplit=1)
+                                    code_part = parts[0]
+                                    comment_part = parts[1] if len(parts) > 1 else ""
+                                    if code_part:
+                                        yield {"data": json.dumps({
+                                            "type": "stream_code",
+                                            "path": target_file,
+                                            "chunk": code_part,
+                                            "is_start": is_first_chunk
+                                        })}
+                                        is_first_chunk = False
+                                    in_closing_comment = True
+                                    if comment_part.strip():
+                                        yield {"data": json.dumps({"message": {"content": comment_part}})}
+                                    continue
+
+                                yield {"data": json.dumps({
+                                    "type": "stream_code",
+                                    "path": target_file,
+                                    "chunk": token,
+                                    "is_start": is_first_chunk
+                                })}
+                                is_first_chunk = False
+                            else:
+                                # Режим работы с несколькими файлами через теги [FILE: ...]
+                                buf += token
+                                if not current_file:
+                                    m = open_tag_re.search(buf)
+                                    if m:
+                                        current_file = (m.group(1) or m.group(2)).strip().strip("/\\ ")
+                                        buf = ""
+                                        is_first_chunk = True
+                                        yield {"data": json.dumps({"message": {"content": f"\n📝 Обновляю файл `{current_file}`...\n"}})}
+                                    else:
+                                        if len(buf) > 40:
+                                            out_part = buf[:-20]
+                                            buf = buf[-20:]
+                                            yield {"data": json.dumps({"message": {"content": out_part}})}
+                                else:
+                                    if close_tag_re.search(buf):
+                                        current_file = None
+                                        buf = ""
+                                    else:
+                                        yield {"data": json.dumps({
+                                            "type": "stream_code",
+                                            "path": current_file,
+                                            "chunk": token,
+                                            "is_start": is_first_chunk
+                                        })}
+                                        is_first_chunk = False
                         except Exception:
                             pass
+
+                if prefix_buf and target_file and not code_started:
+                    clean_prefix = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", prefix_buf.lstrip())
+                    if clean_prefix:
+                        yield {"data": json.dumps({
+                            "type": "stream_code",
+                            "path": target_file,
+                            "chunk": clean_prefix,
+                            "is_start": is_first_chunk
+                        })}
 
                 if buf and not current_file:
                     yield {"data": json.dumps({"message": {"content": buf}})}
@@ -389,17 +475,35 @@ async def execute_agent_task(task: AgentTask):
 
                 now_dt = datetime.datetime.utcnow()
                 t_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Записываем в память роутера проектов для мгновенного отображения в UI
+                try:
+                    from routers.projects import record_file_revision
+                    in_mem_rev = record_file_revision(task.project_name, rpath, body, source="agent")
+                except Exception:
+                    in_mem_rev = None
+
                 ins = await database.db.file_history.insert_one({
                     "project_name": task.project_name,
-                    "file_path": rpath,
+                    "path": rpath.lstrip("./\\ "),
                     "content": body,
+                    "source": "agent",
                     "created_at": now_dt.isoformat(),
                     "timestamp": t_str
                 })
+                
+                rev_payload = in_mem_rev if in_mem_rev else {
+                    "id": str(ins.inserted_id),
+                    "timestamp": t_str,
+                    "created_at": now_dt.isoformat(),
+                    "content": body,
+                    "source": "agent"
+                }
+
                 yield {"data": json.dumps({
                     "type": "file_saved",
-                    "file_path": rpath,
-                    "revision": {"id": str(ins.inserted_id), "timestamp": t_str, "created_at": now_dt.isoformat(), "content": body}
+                    "path": rpath.lstrip("./\\ "),
+                    "revision": rev_payload
                 })}
                 saved_paths.append(rpath)
 

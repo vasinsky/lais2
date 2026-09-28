@@ -146,7 +146,7 @@ describe('RightPanel Component', () => {
     // Наводим курсор на сообщение
     fireEvent.mouseEnter(msgWrapper!);
 
-    const copyBtn = screen.getByTitle('Copy message text');
+    const copyBtn = screen.getByTitle('Copy message');
     const deleteBtn = screen.getByTitle('Delete message');
 
     expect(copyBtn).toBeInTheDocument();

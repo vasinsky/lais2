@@ -78,7 +78,7 @@ export default function App() {
 
   useEffect(() => {
     loadHistoryForCurrentFile(activeProject, activeFile?.path || null);
-  }, [activeProject, activeFile?.path, loadHistoryForCurrentFile]);
+  }, [activeProject, activeFile?.path, loadHistoryForCurrentFile, treeRefreshTrigger]);
 
   const handleAddNewRevision = (newRev: FileHistoryItem) => {
     setFileHistory(prev => [newRev, ...prev.filter(item => item.id !== newRev.id)]);
@@ -243,8 +243,14 @@ export default function App() {
               handleProjectCreatedFromChat(projName, defaultFile);
             }}
             onFileAutoSaved={(filePath, rev) => {
-              if (activeFile?.path === filePath) {
-                handleAddNewRevision(rev);
+              const norm = (p?: string | null) => (p || '').replace(/^\.\//, '').trim();
+              if (norm(activeFile?.path) === norm(filePath)) {
+                if (rev) {
+                  handleAddNewRevision(rev);
+                }
+                if (activeProject && activeFile?.path) {
+                  loadHistoryForCurrentFile(activeProject, activeFile.path);
+                }
               }
               showToast(`File "${filePath}" updated and saved`, "success");
             }}

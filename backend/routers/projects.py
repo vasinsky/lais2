@@ -21,6 +21,22 @@ def get_base_dir() -> str:
 
 _file_history_store: Dict[str, List[Dict[str, Any]]] = {}
 
+def record_file_revision(project_name: str, file_path: str, content: str, source: str = "agent") -> dict:
+    clean_p = file_path.lstrip(r"./\ ")
+    hist_key = f"{project_name}:{clean_p}"
+    if hist_key not in _file_history_store:
+        _file_history_store[hist_key] = []
+    
+    rev = {
+        "id": str(len(_file_history_store[hist_key]) + 1),
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "source": source,
+        "content": content
+    }
+    _file_history_store[hist_key].insert(0, rev)
+    return rev
+
+
 def init_project_structure(*args, **kwargs) -> str:
     if len(args) == 3 and isinstance(args[0], str) and isinstance(args[1], str) and isinstance(args[2], str):
         proj_dir, proj_name, proj_type = args[0], args[1], args[2]
@@ -349,8 +365,31 @@ async def save_image_to_project(name: str, payload: SaveImageRequest):
 
 @router.get("/{name}/history")
 async def get_file_history(name: str, path: str = Query(...)):
-    hist_key = f"{name}:{path}"
-    return _file_history_store.get(hist_key, [])
+    clean_p = path.lstrip(r"./\ ")
+    hist_key = f"{name}:{clean_p}"
+    mem_revs = _file_history_store.get(hist_key, [])
+    if mem_revs:
+        return mem_revs
+
+    # Фоллбек на MongoDB, если в памяти нет
+    try:
+        import database
+        cursor = database.db.file_history.find({"project_name": name, "path": {"$in": [clean_p, f"./{clean_p}", path]}}).sort("created_at", -1)
+        db_revs = []
+        async for doc in cursor:
+            db_revs.append({
+                "id": str(doc.get("_id")),
+                "timestamp": doc.get("timestamp") or doc.get("created_at", ""),
+                "source": doc.get("source", "agent"),
+                "content": doc.get("content", "")
+            })
+        if db_revs:
+            _file_history_store[hist_key] = db_revs
+            return db_revs
+    except Exception:
+        pass
+
+    return []
 
 @router.delete("/{name}/history")
 async def clear_file_history(name: str, path: str = Query(...)):
