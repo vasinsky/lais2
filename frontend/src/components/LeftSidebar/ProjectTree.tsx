@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../../config";
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Folder, 
   FolderOpen, 
@@ -59,6 +59,24 @@ interface ModalState {
 
 const HIDDEN_PROJECTS_STORAGE_KEY = 'lais_hidden_projects';
 
+function formatHistoryDate(raw: string): string {
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const day = pad(d.getDate());
+    const month = pad(d.getMonth() + 1);
+    const year = d.getFullYear();
+    const hours = pad(d.getHours());
+    const minutes = pad(d.getMinutes());
+    const seconds = pad(d.getSeconds());
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+  } catch {
+    return raw;
+  }
+}
+
+
 export default function ProjectTree({
   activeProject,
   activeFilePath,
@@ -92,6 +110,36 @@ export default function ProjectTree({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { showToast } = useToast();
+  const [historyHeight, setHistoryHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("lais_history_height");
+    return saved ? parseInt(saved, 10) : 220;
+  });
+  const isDraggingHistory = useRef(false);
+
+  const startDragHistory = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingHistory.current = true;
+    const startY = e.clientY;
+    const startHeight = historyHeight;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDraggingHistory.current) return;
+      const delta = startY - ev.clientY;
+      const newHeight = Math.max(90, Math.min(startHeight + delta, window.innerHeight * 0.6));
+      setHistoryHeight(newHeight);
+      localStorage.setItem("lais_history_height", newHeight.toString());
+    };
+
+    const onMouseUp = () => {
+      isDraggingHistory.current = false;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [historyHeight]);
+
 
   const fetchProjects = async () => {
     try {
@@ -589,18 +637,42 @@ export default function ProjectTree({
         )}
       </div>
 
-      {/* File History Section */}
+            {/* File History Section */}
       {activeFilePath && (
-        <div style={{ borderTop: '1px solid var(--border-color)', maxHeight: '35%', display: 'flex', flexDirection: 'column' }}>
+        <div style={{
+          height: `${historyHeight}px`,
+          minHeight: 90,
+          borderTop: "1px solid var(--border-color)",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--bg-panel)",
+          position: "relative"
+        }}>
+          {/* Horizontal drag handle */}
+          <div
+            onMouseDown={startDragHistory}
+            style={{
+              position: "absolute",
+              top: -3,
+              left: 0,
+              right: 0,
+              height: 6,
+              cursor: "row-resize",
+              zIndex: 10
+            }}
+          />
+
           <div style={{
             height: 32,
-            padding: '0 12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'var(--bg-header)'
+            minHeight: 32,
+            padding: "0 10px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "var(--bg-header)",
+            borderBottom: "1px solid var(--border-color)"
           }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.05em", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 5 }}>
               <History size={12} /> FILE HISTORY
             </span>
             {fileHistory.length > 0 && (
@@ -614,9 +686,9 @@ export default function ProjectTree({
               </button>
             )}
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 6px' }}>
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 6px" }}>
             {fileHistory.length === 0 ? (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '8px 0' }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", padding: "12px 0" }}>
                 No revisions yet
               </div>
             ) : (
@@ -627,22 +699,32 @@ export default function ProjectTree({
                     key={item.id}
                     onClick={() => onSelectHistoryItem(isItemActive ? null : item)}
                     style={{
-                      padding: '4px 8px',
+                      padding: "5px 8px",
                       borderRadius: 4,
-                      marginBottom: 2,
-                      cursor: 'pointer',
-                      fontSize: 11,
-                      background: isItemActive ? 'var(--bg-active-item, rgba(59, 130, 246, 0.15))' : 'transparent',
-                      color: isItemActive ? 'var(--primary-color, #2563eb)' : 'var(--text-main)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2
+                      marginBottom: 3,
+                      cursor: "pointer",
+                      fontSize: 11.5,
+                      background: isItemActive ? "var(--bg-active-item, rgba(59, 130, 246, 0.15))" : "transparent",
+                      color: isItemActive ? "var(--primary-color, #2563eb)" : "var(--text-main)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      border: isItemActive ? "1px solid rgba(59, 130, 246, 0.3)" : "1px solid transparent"
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600 }}>{item.source}</span>
-                      <span style={{ fontSize: 9.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Clock size={9} /> {item.timestamp}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Clock size={11} style={{ opacity: 0.7 }} />
+                        {formatHistoryDate(item.timestamp)}
+                      </span>
+                      <span style={{
+                        fontSize: 9.5,
+                        color: "var(--text-muted)",
+                        background: "rgba(255, 255, 255, 0.06)",
+                        padding: "1px 5px",
+                        borderRadius: 3
+                      }}>
+                        {item.source}
                       </span>
                     </div>
                   </div>
