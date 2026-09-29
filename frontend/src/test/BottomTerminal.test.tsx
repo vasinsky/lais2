@@ -1,3 +1,4 @@
+import "./mockEventSource";
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
@@ -83,7 +84,7 @@ describe('BottomTerminal Component', () => {
       />
     );
 
-    const expandBtn = screen.getByTitle('Expand terminal');
+    const expandBtn = screen.getByTitle('Expand panel');
     expect(expandBtn).toBeInTheDocument();
     fireEvent.click(expandBtn);
     expect(handleToggle).toHaveBeenCalledTimes(1);

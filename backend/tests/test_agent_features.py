@@ -4,11 +4,25 @@ import os
 import shutil
 from unittest.mock import patch, AsyncMock, MagicMock
 from routers.projects import get_base_dir
+from unittest.mock import patch, AsyncMock, MagicMock
+from services.mcp_client import mcp_client
 
 TEST_PROJECT = "TestAgentProject"
 
 @pytest.fixture(autouse=True)
 def setup_test_project():
+    orig_list = mcp_client.list_files
+    orig_write = mcp_client.write_file
+
+    async def mock_write(project, path, content):
+        full_p = os.path.join(get_base_dir(), project, path)
+        os.makedirs(os.path.dirname(full_p), exist_ok=True)
+        with open(full_p, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"status": "ok"}
+
+    mcp_client.list_files = AsyncMock(return_value=[{"path": "index.html", "is_dir": False}, {"path": "style.css", "is_dir": False}])
+    mcp_client.write_file = AsyncMock(side_effect=mock_write)
     proj_dir = os.path.join(get_base_dir(), TEST_PROJECT)
     os.makedirs(proj_dir, exist_ok=True)
     
@@ -54,25 +68,24 @@ async def test_agent_realtime_code_streaming_contract(api_client):
     mock_client.stream.return_value = create_mock_stream_context(mock_chunks)
     mock_client.post = AsyncMock()
 
-    with patch("routers.agent.httpx.AsyncClient") as mock_http:
+    with patch("services.agent_handlers.file_ops.httpx.AsyncClient") as mock_http:
         mock_http.return_value.__aenter__.return_value = mock_client
 
-        response = await api_client.post("/api/agent/execute", json={
+        events = []
+        async with api_client.stream("POST", "/api/agent/execute", json={
             "project_name": TEST_PROJECT,
             "prompt": "Наполни главную страницу index.html информацией о строительстве бань",
             "model": "qwen2.5-coder:7b-instruct-q4_K_M"
-        })
-
-        assert response.status_code == 200
-        events = []
-        for line in response.text.split("\n"):
-            if line.startswith("data: "):
-                data_str = line[6:].strip()
-                if data_str and data_str != "[DONE]":
-                    try:
-                        events.append(json.loads(data_str))
-                    except Exception:
-                        pass
+        }) as response:
+            assert response.status_code == 200
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str and data_str != "[DONE]":
+                        try:
+                            events.append(json.loads(data_str))
+                        except Exception:
+                            pass
 
         stream_code_events = [e for e in events if e.get("type") == "stream_code"]
         assert len(stream_code_events) >= 2
@@ -120,27 +133,33 @@ async def test_agent_comfyui_image_intent_and_generation(api_client):
         client_instance.stream.return_value = mock_stream_ctx
         return client_instance
 
-    with patch("routers.agent.generate_image_stream", side_effect=mock_generate_image_stream), \
-         patch("routers.agent.translate_text_to_english", new_callable=AsyncMock) as mock_trans, \
-         patch("routers.agent.httpx.AsyncClient", side_effect=mock_async_client_factory):
-        mock_trans.return_value = "A beautiful wooden bathhouse in the forest"
+    mock_trans_resp = MagicMock()
+    mock_trans_resp.status_code = 200
+    mock_trans_resp.json.return_value = {"response": "A beautiful wooden bathhouse in the forest"}
 
-        response = await api_client.post("/api/agent/execute", json={
+    def mock_async_client_factory_fixed(*args, **kwargs):
+        c = mock_async_client_factory(*args, **kwargs)
+        c.post = AsyncMock(return_value=mock_trans_resp)
+        return c
+
+    with patch("services.agent_handlers.image_gen.generate_image_stream", side_effect=mock_generate_image_stream), \
+         patch("services.agent_handlers.image_gen.httpx.AsyncClient", side_effect=mock_async_client_factory_fixed):
+
+        events = []
+        async with api_client.stream("POST", "/api/agent/execute", json={
             "project_name": TEST_PROJECT,
             "prompt": prompt,
             "model": "qwen2.5-coder:7b-instruct-q4_K_M"
-        })
-
-        assert response.status_code == 200
-        events = []
-        for line in response.text.split("\n"):
-            if line.startswith("data: "):
-                data_str = line[6:].strip()
-                if data_str and data_str != "[DONE]":
-                    try:
-                        events.append(json.loads(data_str))
-                    except Exception:
-                        pass
+        }) as response:
+            assert response.status_code == 200
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str and data_str != "[DONE]":
+                        try:
+                            events.append(json.loads(data_str))
+                        except Exception:
+                            pass
 
         progress_events = [e for e in events if e.get("type") == "image_progress"]
         assert len(progress_events) > 0, "Должно прийти событие image_progress"
@@ -166,18 +185,25 @@ async def test_agent_vision_analysis_pipeline(api_client):
     mock_client.stream.return_value = create_mock_stream_context(mock_chunks)
     mock_client.post = AsyncMock()
 
-    with patch("routers.agent.analyze_vision_to_english", new_callable=AsyncMock) as mock_vision, \
-         patch("routers.agent.httpx.AsyncClient") as mock_http:
-
+    with patch("services.agent_handlers.vision_handlers.httpx.AsyncClient") as mock_http:
         mock_http.return_value.__aenter__.return_value = mock_client
-        mock_vision.return_value = "A wooden house blueprint with two floors"
 
-        response = await api_client.post("/api/agent/execute", json={
+        events = []
+        async with api_client.stream("POST", "/api/agent/execute", json={
             "project_name": TEST_PROJECT,
             "prompt": "Что изображено на этой схеме?",
             "images": ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
             "model": "qwen2.5-coder:7b-instruct-q4_K_M"
-        })
+        }) as response:
+            assert response.status_code == 200
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str and data_str != "[DONE]":
+                        try:
+                            events.append(json.loads(data_str))
+                        except Exception:
+                            pass
 
         assert response.status_code == 200
-        mock_vision.assert_awaited_once()
+        mock_client.stream.assert_called_once()

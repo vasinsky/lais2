@@ -122,8 +122,16 @@ async def test_project_tree_navigation(api_client):
 
 # --- 6. FILE CRUD & REVISION HISTORY ---
 async def test_file_read_write_and_history(api_client):
+    from unittest.mock import AsyncMock
+    from services.mcp_client import mcp_client
+    # Гарантируем чтение актуального файла с диска для изоляции теста
+    mcp_client.read_file = AsyncMock(side_effect=Exception("force disk read"))
+    mcp_client.write_file = AsyncMock(side_effect=Exception("force disk write"))
+
     workspace_dir = chat_router.WORKSPACE_DIR
     proj_dir = os.path.join(workspace_dir, "crud_project")
+    if os.path.exists(proj_dir):
+        shutil.rmtree(proj_dir, ignore_errors=True)
     os.makedirs(proj_dir, exist_ok=True)
 
     file_rel = "app.py"

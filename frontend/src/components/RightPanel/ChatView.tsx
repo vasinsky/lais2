@@ -521,7 +521,7 @@ export default function ChatView({
           <button
             onClick={() => fileInputRef.current?.click()}
             className="theme-toggle-btn"
-            style={{ padding: 6 }}
+            style={{ height: 36, width: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
             title="Attach images"
           >
             <Paperclip size={15} />
@@ -537,7 +537,7 @@ export default function ChatView({
               }
             }}
             placeholder="Ask question or request image..."
-            rows={2}
+            rows={1}
             style={{
               flex: 1,
               resize: 'none',

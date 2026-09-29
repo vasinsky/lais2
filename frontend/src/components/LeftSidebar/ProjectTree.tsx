@@ -710,7 +710,9 @@ export default function ProjectTree({
               <div 
                 key={proj} 
                 style={{ 
-                  marginBottom: 4,
+                  marginBottom: 2,
+                  paddingBottom: 4,
+                  borderBottom: "1px solid var(--border-color)",
                   opacity: isHidden ? 0.6 : 1.0
                 }}
                 onDragOver={(e) => handleDragOver(e, `${proj}:root`)}

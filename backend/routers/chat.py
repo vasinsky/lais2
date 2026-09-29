@@ -1,3 +1,5 @@
+from services.event_bus import project_event_bus
+from services.intent_router import classify_intent, IntentType
 import bson
 import os
 import re
@@ -43,11 +45,22 @@ class ChatPayload(BaseModel):
     messages: List[ChatMessage]
     stream: Optional[bool] = True
 
+@router.post("/stop")
 @router.post("/interrupt")
 async def stop_generation():
-    """Отменяет текущую генерацию в ComfyUI"""
+    try:
+        await project_event_bus.emit("general", {
+            "project": "general",
+            "type": "response",
+            "method": "HTTP:POST",
+            "url": "/api/chat/stop",
+            "status": 200,
+            "payload": {"action": "abort_requested", "target": "chat/inference"}
+        })
+    except Exception:
+        pass
     success = await interrupt_execution()
-    return {"status": "interrupted" if success else "failed"}
+    return {"status": "interrupted" if success else "stopped"}
 
 @router.get("/image/view")
 async def view_comfy_image(filename: str, subfolder: str = "", type: str = "output"):
@@ -214,6 +227,35 @@ async def chat_stream(payload: ChatPayload):
     last_user_msg = payload.messages[-1]
     checkpoint = payload.comfy_checkpoint or os.getenv("COMFYUI_DEFAULT_CHECKPOINT", "Realistic_Vision_V6.0_NV_B1_fp16.safetensors")
     print(f"DEBUG: last_msg content={repr(last_user_msg.content)}, images_count={len(last_user_msg.images or [])}, has_images={has_images}")
+
+    # --- ПРОВЕРКА ИНТЕНТА ДЛЯ GLOBAL CHAT ---
+    intent_data = classify_intent(
+        prompt=last_user_msg.content,
+        has_images=has_images,
+        is_agent_mode=False
+    )
+
+    if intent_data["intent"] == IntentType.FILE_OPS:
+        async def file_ops_rejected():
+            notice = (
+                "ℹ️ **Direct file operations and code modifications are not available in Global Chat.**\n\n"
+                "To create, edit, or manage files, please select an existing project in the left sidebar "
+                "or switch to **Project Agent**."
+            )
+            yield {"data": json.dumps({"type": "meta", "model": target_model})}
+            yield {"data": json.dumps({"message": {"content": notice}})}
+            if database.db is not None:
+                now_iso = datetime.datetime.utcnow().isoformat()
+                await database.db.chat_threads.update_one(
+                    {"thread_id": "global_chat"},
+                    {"$push": {"messages": {
+                        "role": "assistant",
+                        "content": notice,
+                        "modelUsed": target_model,
+                        "created_at": now_iso
+                    }}}
+                )
+        return EventSourceResponse(file_ops_rejected(), headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # --- 1. ОБРАБОТКА ГЕНЕРАЦИИ КАРТИНКИ ЧЕРЕЗ COMFYUI ---
     img_desc = parse_image_generation_intent(last_user_msg.content)

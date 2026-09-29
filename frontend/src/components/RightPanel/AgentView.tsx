@@ -558,7 +558,7 @@ export default function AgentView({
           <button
             onClick={() => fileInputRef.current?.click()}
             className="theme-toggle-btn"
-            style={{ padding: 6 }}
+            style={{ height: 36, width: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
             title="Attach images"
           >
             <Paperclip size={15} />
@@ -575,7 +575,7 @@ export default function AgentView({
             }}
             placeholder={activeProject ? `Give task to agent in ${activeProject}...` : "Select a project first..."}
             disabled={!activeProject}
-            rows={2}
+            rows={1}
             style={{
               flex: 1,
               resize: 'none',
@@ -621,7 +621,10 @@ export default function AgentView({
                 cursor: activeProject ? 'pointer' : 'not-allowed',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                justifyContent: 'center',
+                height: 36,
+                width: 40,
+                padding: 0,
                 opacity: activeProject ? 1 : 0.6
               }}
               title="Send task to agent"

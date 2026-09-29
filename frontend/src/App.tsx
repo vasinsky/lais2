@@ -80,6 +80,17 @@ export default function App() {
     loadHistoryForCurrentFile(activeProject, activeFile?.path || null);
   }, [activeProject, activeFile?.path, loadHistoryForCurrentFile, treeRefreshTrigger]);
 
+  const handleModeChange = (m: "chat" | "agent") => {
+    setChatMode(m);
+    if (m === "chat") {
+      setActiveProject(null);
+      setActiveFile(null);
+      setActiveFileContent("");
+      setSelectedHistoryItem(null);
+      setFileHistory([]);
+    }
+  };
+
   const handleAddNewRevision = (newRev: FileHistoryItem) => {
     setFileHistory(prev => [newRev, ...prev.filter(item => item.id !== newRev.id)]);
   };
@@ -232,7 +243,7 @@ export default function App() {
         <div className="panel-card" style={{ width: `${rightWidth}px`, flexShrink: 0 }}>
           <RightPanel 
             mode={chatMode}
-            onModeChange={setChatMode}
+            onModeChange={handleModeChange}
             activeProject={activeProject}
             activeFilePath={activeFile?.path}
             activeFileContent={activeFileContent}
