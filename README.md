@@ -18,6 +18,20 @@ Self-hosted AI Development Environment: Autonomous Code Assistant & Visual Gener
 ### Overview
 Local AI Studio is a self-hosted workspace combining local Large Language Models (LLMs via Ollama) and image generation pipelines (ComfyUI). It provides a full developer workflow for creating, running, refactoring, and previewing code alongside AI-assisted visual asset production—all containerized and private.
 
+### Interface Preview
+
+<p align="center">
+  <b>Dark Theme</b><br/>
+  <img src="images/dark.svg" alt="Local AI Studio Dark Theme" width="100%" />
+</p>
+
+<p align="center">
+  <b>Light Theme</b><br/>
+  <img src="images/light.svg" alt="Local AI Studio Light Theme" width="100%" />
+</p>
+
+---
+
 ### Architecture & Key Features
 - **Decoupled Containerization:** Microservices architecture with FastAPI (backend), React/Vite (frontend), and MongoDB (mongo) managed by Docker Compose.
 - **Unified Project Lifecycle Management:** Native runtime controls (Start/Stop) for Docker Compose and Python services directly from the project explorer.
@@ -190,6 +204,20 @@ File modified: js/app.js
 
 ### Описание проекта
 Local AI Studio — это локальная среда разработки и генерации, объединяющая возможности локальных языковых моделей (LLM через Ollama) и генерации изображений (ComfyUI). Платформа предоставляет единый интерфейс для кодогенерации, навигации по проектам, версионирования файлов, управления жизненным циклом сервисов и создания графических ассетов без передачи данных в публичные облака.
+
+### Интерфейс платформы
+
+<p align="center">
+  <b>Тёмная тема</b><br/>
+  <img src="images/dark.svg" alt="Local AI Studio Dark Theme" width="100%" />
+</p>
+
+<p align="center">
+  <b>Светлая тема</b><br/>
+  <img src="images/light.svg" alt="Local AI Studio Light Theme" width="100%" />
+</p>
+
+---
 
 ### Архитектура и функционал
 - **Полная контейнеризация:** Микросервисная архитектура FastAPI (бэкенд), React/Vite (фронтенд) и MongoDB (база данных) под управлением Docker Compose.

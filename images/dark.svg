@@ -1,0 +1,302 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900" width="100%" height="100%" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <defs>
+    <!-- Shadows & Neon Glows -->
+    <filter id="shadow-dark" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+    <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#3b82f6" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="1440" height="900" fill="#0f172a"/>
+
+  <!-- ==================== TOP NAVIGATION BAR ==================== -->
+  <rect x="0" y="0" width="1440" height="48" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  
+  <!-- Logo & Title -->
+  <circle cx="28" cy="24" r="10" fill="#6366f1"/>
+  <path d="M24 20 L28 28 L32 20" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <text x="46" y="29" font-size="13" font-weight="700" fill="#f8fafc" letter-spacing="0.05em">LOCAL AI STUDIO</text>
+
+  <!-- Top Center Controls (Model Selectors) -->
+  <g transform="translate(620, 11)">
+    <!-- Ollama status dot & selector -->
+    <circle cx="0" cy="13" r="4" fill="#22c55e"/>
+    <text x="10" y="16" font-size="11.5" font-weight="500" fill="#94a3b8">Ollama:</text>
+    <rect x="58" y="0" width="180" height="26" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="68" y="17" font-size="11" fill="#f1f5f9" font-weight="500">qwen2.5-coder:7b-instruct</text>
+    <path d="M226 12 L230 16 L234 12" stroke="#94a3b8" stroke-width="1.5" fill="none"/>
+
+    <!-- Comfy status dot & selector -->
+    <circle cx="260" cy="13" r="4" fill="#22c55e"/>
+    <text x="270" y="16" font-size="11.5" font-weight="500" fill="#94a3b8">Comfy:</text>
+    <rect x="318" y="0" width="190" height="26" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="328" y="17" font-size="11" fill="#f1f5f9" font-weight="500">Realistic_Vision_V6.0</text>
+    <path d="M496 12 L500 16 L504 12" stroke="#94a3b8" stroke-width="1.5" fill="none"/>
+  </g>
+
+  <!-- Top Right Actions -->
+  <g transform="translate(1260, 11)">
+    <!-- Prompts Button -->
+    <rect x="0" y="0" width="105" height="26" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <text x="10" y="17" font-size="11" font-weight="500" fill="#cbd5e1">System prompts (2)</text>
+    
+    <!-- Theme Toggle -->
+    <rect x="114" y="0" width="56" height="26" rx="5" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+    <path d="M124 10 A5 5 0 0 0 131 17 A6 6 0 1 1 124 10" fill="#94a3b8"/>
+    <text x="136" y="17" font-size="11" font-weight="500" fill="#cbd5e1">Dark</text>
+  </g>
+
+  <!-- ==================== LEFT SIDEBAR (PROJECT TREE) ==================== -->
+  <g transform="translate(0, 48)">
+    <rect width="250" height="852" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+
+    <!-- Header -->
+    <rect width="250" height="38" fill="#1e293b"/>
+    <text x="12" y="23" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.05em">PROJECTS TREE</text>
+    <circle cx="168" cy="19" r="9" fill="#0f172a"/>
+    <path d="M165 19 H171 M168 16 V22" stroke="#cbd5e1" stroke-width="1.2"/>
+    <circle cx="190" cy="19" r="9" fill="#0f172a"/>
+    <circle cx="190" cy="19" r="3" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>
+    <circle cx="212" cy="19" r="9" fill="#0f172a"/>
+    <path d="M209 17 A4 4 0 1 1 211 22" stroke="#cbd5e1" stroke-width="1.2" fill="none"/>
+
+    <!-- Tree items -->
+    <!-- Proj 1: DockerTest -->
+    <g transform="translate(10, 44)">
+      <path d="M4 8 L8 12 L4 16" stroke="#64748b" stroke-width="1.5" fill="none"/>
+      <rect x="14" y="4" width="14" height="11" rx="1.5" fill="#3b82f6"/>
+      <text x="36" y="14" font-size="12" font-weight="500" fill="#cbd5e1">DockerTest</text>
+      <polygon points="190,8 196,12 190,16" fill="#64748b"/>
+      <circle cx="208" cy="12" r="3" stroke="#64748b" stroke-width="1.2" fill="none"/>
+      <path d="M222 8 V16 M220 8 H226" stroke="#64748b" stroke-width="1.2"/>
+    </g>
+
+    <!-- Proj 2: PythonTest (Active) -->
+    <g transform="translate(6, 72)">
+      <rect x="0" y="0" width="238" height="26" rx="4" fill="rgba(59, 130, 246, 0.15)"/>
+      <path d="M6 10 L10 14 L14 10" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+      <rect x="18" y="7" width="14" height="11" rx="1.5" fill="#3b82f6"/>
+      <text x="40" y="17" font-size="12.5" font-weight="600" fill="#60a5fa">PythonTest</text>
+      
+      <!-- Python play running -->
+      <rect x="186" y="8" width="8" height="8" fill="#10b981"/>
+      <circle cx="206" cy="12" r="3" stroke="#94a3b8" stroke-width="1.2" fill="none"/>
+      <path d="M222 8 V16 M220 8 H226" stroke="#ef4444" stroke-width="1.2"/>
+    </g>
+
+    <!-- Nested files under PythonTest -->
+    <g transform="translate(32, 104)">
+      <!-- main.py (Selected) -->
+      <rect x="-6" y="-2" width="210" height="22" rx="3" fill="rgba(59, 130, 246, 0.25)"/>
+      <path d="M6 3 H14 V15 H6 Z" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
+      <text x="22" y="12" font-size="12" font-weight="600" fill="#60a5fa">main.py</text>
+
+      <!-- requirements.txt -->
+      <g transform="translate(0, 22)">
+        <path d="M6 3 H14 V15 H6 Z" stroke="#94a3b8" stroke-width="1.2" fill="none"/>
+        <text x="22" y="12" font-size="12" fill="#94a3b8">requirements.txt</text>
+      </g>
+    </g>
+
+    <!-- Proj 3: any-project -->
+    <g transform="translate(10, 154)">
+      <path d="M4 8 L8 12 L4 16" stroke="#64748b" stroke-width="1.5" fill="none"/>
+      <rect x="14" y="4" width="14" height="11" rx="1.5" fill="#64748b"/>
+      <text x="36" y="14" font-size="12" font-weight="500" fill="#cbd5e1">any-project</text>
+    </g>
+
+    <!-- ================= FILE HISTORY PANEL ================= -->
+    <g transform="translate(0, 520)">
+      <line x1="0" y1="0" x2="250" y2="0" stroke="#334155" stroke-width="1"/>
+      <rect x="0" y="0" width="250" height="32" fill="#0f172a"/>
+      <text x="12" y="20" font-size="10.5" font-weight="700" fill="#94a3b8" letter-spacing="0.05em">FILE HISTORY</text>
+      <path d="M228 14 L232 18 L236 14" stroke="#94a3b8" stroke-width="1.5" fill="none"/>
+
+      <!-- History rows -->
+      <g transform="translate(8, 38)">
+        <rect width="234" height="32" rx="4" fill="rgba(59, 130, 246, 0.15)" stroke="rgba(59, 130, 246, 0.4)" stroke-width="1"/>
+        <circle cx="14" cy="16" r="4" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
+        <text x="24" y="19" font-size="11" font-weight="600" fill="#93c5fd">29.09.2026 10:45:12</text>
+        <rect x="180" y="8" width="46" height="16" rx="3" fill="#334155"/>
+        <text x="188" y="20" font-size="9" font-weight="600" fill="#f1f5f9">agent</text>
+      </g>
+      <g transform="translate(8, 74)">
+        <circle cx="14" cy="16" r="4" stroke="#64748b" stroke-width="1.2" fill="none"/>
+        <text x="24" y="19" font-size="11" fill="#94a3b8">29.09.2026 10:30:00</text>
+        <rect x="180" y="8" width="46" height="16" rx="3" fill="#0f172a"/>
+        <text x="188" y="20" font-size="9" fill="#64748b">manual</text>
+      </g>
+    </g>
+
+    <!-- ================= BACKUPS PANEL ================= -->
+    <g transform="translate(0, 680)">
+      <line x1="0" y1="0" x2="250" y2="0" stroke="#334155" stroke-width="1"/>
+      <rect x="0" y="0" width="250" height="32" fill="#0f172a"/>
+      <text x="12" y="20" font-size="10.5" font-weight="700" fill="#94a3b8" letter-spacing="0.05em">BACKUPS</text>
+      <!-- Plus Button -->
+      <circle cx="204" cy="16" r="8" fill="#1e293b" stroke="#475569"/>
+      <path d="M201 16 H207 M204 13 V19" stroke="#60a5fa" stroke-width="1.4"/>
+      <path d="M228 14 L232 18 L236 14" stroke="#94a3b8" stroke-width="1.5" fill="none"/>
+
+      <!-- Backup row -->
+      <g transform="translate(8, 40)">
+        <circle cx="14" cy="15" r="4" stroke="#94a3b8" stroke-width="1.2" fill="none"/>
+        <text x="24" y="18" font-size="11" font-weight="600" fill="#f8fafc">29.09.2026 07:57:46</text>
+        <text x="142" y="18" font-size="10.5" fill="#94a3b8">(0.12 MB)</text>
+        
+        <!-- Restore & Delete Icons -->
+        <circle cx="196" cy="15" r="7" fill="#0f172a"/>
+        <path d="M194 13 A3 3 0 1 1 194 17" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
+        <circle cx="214" cy="15" r="7" fill="#450a0a"/>
+        <path d="M211 12 V18 M217 12 V18" stroke="#ef4444" stroke-width="1.2"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ==================== CENTER EDITOR & WORKSPACE ==================== -->
+  <g transform="translate(250, 48)">
+    <rect width="840" height="520" fill="#0b1120"/>
+
+    <!-- Editor Tab -->
+    <rect x="0" y="0" width="840" height="34" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <rect x="10" y="4" width="110" height="30" rx="4" fill="#0b1120" stroke="#334155" stroke-width="1"/>
+    <text x="24" y="23" font-size="12" font-weight="600" fill="#60a5fa">main.py</text>
+    <path d="M102 16 L108 22 M108 16 L102 22" stroke="#64748b" stroke-width="1.2"/>
+
+    <!-- Code Line Numbers & Syntax Highlighter mockup -->
+    <g transform="translate(20, 56)" font-family="monospace" font-size="12">
+      <!-- Line 1 -->
+      <text x="0" y="16" fill="#475569">1</text>
+      <text x="30" y="16" fill="#c084fc" font-weight="bold">import</text>
+      <text x="80" y="16" fill="#f8fafc">os</text>
+      
+      <!-- Line 2 -->
+      <text x="0" y="36" fill="#475569">2</text>
+      <text x="30" y="36" fill="#c084fc" font-weight="bold">from</text>
+      <text x="65" y="36" fill="#f8fafc">http.server</text>
+      <text x="150" y="36" fill="#c084fc" font-weight="bold">import</text>
+      <text x="200" y="36" fill="#f8fafc">HTTPServer, SimpleHTTPRequestHandler</text>
+
+      <!-- Line 3 -->
+      <text x="0" y="56" fill="#475569">3</text>
+      
+      <!-- Line 4 -->
+      <text x="0" y="76" fill="#475569">4</text>
+      <text x="30" y="76" fill="#93c5fd">PORT</text>
+      <text x="65" y="76" fill="#f8fafc">=</text>
+      <text x="80" y="76" fill="#38bdf8">int</text>
+      <text x="105" y="76" fill="#f8fafc">(os.environ.get(</text>
+      <text x="215" y="76" fill="#4ade80">"PORT"</text>
+      <text x="260" y="76" fill="#f8fafc">, 8050))</text>
+
+      <!-- Line 5 -->
+      <text x="0" y="96" fill="#475569">5</text>
+      <text x="30" y="96" fill="#c084fc" font-weight="bold">def</text>
+      <text x="60" y="96" fill="#fbbf24">run</text>
+      <text x="85" y="96" fill="#f8fafc">():</text>
+
+      <!-- Line 6 -->
+      <text x="0" y="116" fill="#475569">6</text>
+      <text x="50" y="116" fill="#f8fafc">server = HTTPServer((</text>
+      <text x="195" y="116" fill="#4ade80">"0.0.0.0"</text>
+      <text x="245" y="116" fill="#f8fafc">, PORT), SimpleHTTPRequestHandler)</text>
+
+      <!-- Line 7 -->
+      <text x="0" y="136" fill="#475569">7</text>
+      <text x="50" y="136" fill="#38bdf8">print</text>
+      <text x="85" y="136" fill="#f8fafc">(f</text>
+      <text x="95" y="136" fill="#4ade80">"Serving Python service on port {PORT}"</text>
+      <text x="350" y="136" fill="#f8fafc">)</text>
+
+      <!-- Line 8 -->
+      <text x="0" y="156" fill="#475569">8</text>
+      <text x="50" y="156" fill="#f8fafc">server.serve_forever()</text>
+    </g>
+
+    <!-- ================= BOTTOM DRAWER (TERMINAL / CONSOLE) ================= -->
+    <g transform="translate(0, 520)">
+      <!-- Tab Header Bar -->
+      <rect width="840" height="34" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+      
+      <!-- Terminal Tab -->
+      <rect x="8" y="4" width="90" height="26" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="20" y="21" font-size="11.5" font-weight="600" fill="#cbd5e1">&gt;_ Terminal</text>
+
+      <!-- Console Tab (Active) -->
+      <rect x="104" y="4" width="95" height="26" rx="4" fill="#2563eb" filter="url(#neon-glow)"/>
+      <text x="116" y="21" font-size="11.5" font-weight="600" fill="#ffffff">Console (7)</text>
+
+      <text x="216" y="21" font-size="11" font-family="monospace" fill="#94a3b8">projects/PythonTest</text>
+
+      <!-- Drawer Content (Console Traces) -->
+      <rect x="0" y="34" width="840" height="298" fill="#050914"/>
+
+      <!-- Console Item 1 -->
+      <g transform="translate(12, 44)">
+        <rect width="816" height="54" rx="4" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+        <text x="12" y="18" font-family="monospace" font-size="11" fill="#94a3b8">[11:02:14]</text>
+        <rect x="85" y="6" width="34" height="16" rx="3" fill="#052e16"/>
+        <text x="91" y="18" font-family="monospace" font-size="10" font-weight="700" fill="#4ade80">RES</text>
+        <text x="128" y="18" font-family="monospace" font-size="11" font-weight="600" fill="#f8fafc">POST /api/projects/PythonTest/backups 200 (340ms)</text>
+        <text x="12" y="38" font-family="monospace" font-size="10.5" fill="#94a3b8">{ "filename": "PythonTest_2026-09-29_11-02-14.zip", "size_bytes": 128450 }</text>
+      </g>
+
+      <!-- Console Item 2 -->
+      <g transform="translate(12, 106)">
+        <rect width="816" height="54" rx="4" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+        <text x="12" y="18" font-family="monospace" font-size="11" fill="#94a3b8">[11:01:50]</text>
+        <rect x="85" y="6" width="34" height="16" rx="3" fill="#1e1b4b"/>
+        <text x="91" y="18" font-family="monospace" font-size="10" font-weight="700" fill="#818cf8">REQ</text>
+        <text x="128" y="18" font-family="monospace" font-size="11" font-weight="600" fill="#f8fafc">POST /api/projects/PythonTest/backups</text>
+        <text x="12" y="38" font-family="monospace" font-size="10.5" fill="#94a3b8">{ "action": "create_backup" }</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ==================== RIGHT PANEL (AI CHAT / AGENT) ==================== -->
+  <g transform="translate(1090, 48)">
+    <rect width="350" height="852" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+
+    <!-- Tabs Header -->
+    <rect width="350" height="38" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+    <text x="24" y="24" font-size="12" font-weight="500" fill="#94a3b8">Global Chat</text>
+    <rect x="110" y="6" width="115" height="26" rx="4" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+    <text x="122" y="23" font-size="12" font-weight="700" fill="#60a5fa">✨ Project Agent</text>
+
+    <!-- Context Meta line -->
+    <g transform="translate(16, 52)">
+      <text x="0" y="0" font-size="10.5" font-family="monospace" fill="#64748b">Messages: 4</text>
+      <text x="80" y="0" font-size="10.5" font-family="monospace" fill="#64748b">DB: 1.2 KB</text>
+      <text x="240" y="0" font-size="10.5" font-family="monospace" fill="#22c55e">Context: 16k</text>
+    </g>
+
+    <!-- Chat Message List -->
+    <!-- User Bubble -->
+    <g transform="translate(80, 80)">
+      <rect width="250" height="36" rx="8" fill="#2563eb" filter="url(#shadow-dark)"/>
+      <text x="14" y="22" font-size="12" fill="#ffffff" font-weight="500">создай пайтон проект PythonTest</text>
+    </g>
+
+    <!-- Agent Response Card -->
+    <g transform="translate(16, 130)">
+      <rect width="318" height="96" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+      <text x="14" y="24" font-size="12" fill="#f8fafc" font-weight="500">Project `PythonTest` initialized successfully.</text>
+      <g transform="translate(14, 38)" font-family="monospace" font-size="10.5" fill="#94a3b8">
+        <text x="0" y="12">✓ Directory created: PythonTest/</text>
+        <text x="0" y="28">✓ File created: main.py</text>
+        <text x="0" y="44">✓ File created: requirements.txt</text>
+      </g>
+    </g>
+
+    <!-- Chat Prompt Input at Bottom -->
+    <g transform="translate(16, 786)">
+      <rect width="318" height="52" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+      <text x="16" y="31" font-size="12" fill="#64748b">Give task to agent...</text>
+      <circle cx="294" cy="26" r="16" fill="#2563eb"/>
+      <path d="M290 26 L298 22 L294 30 Z" fill="#ffffff"/>
+    </g>
+  </g>
+</svg>
