@@ -644,7 +644,19 @@ export default function RightPanel({
                   wordBreak: 'break-word',
                   boxShadow: isUser ? 'none' : '0 1px 2px rgba(0,0,0,0.05)', width: (msg.image_progress || msg.generated_image) ? '100%' : 'auto', boxSizing: 'border-box'
                 }}>
-                  {renderMessageContent(msg.content)}
+                  {!isUser && !msg.content && !msg.generated_image && !msg.image_progress ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "2px 2px", color: "var(--text-muted)", fontSize: 11.5 }}>
+                      <Sparkles size={13} style={{ color: "var(--primary-color, #3b82f6)", animation: "spin 3s linear infinite" }} />
+                      <span style={{ fontWeight: 500, opacity: 0.85 }}>Thinking</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 1 }}>
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                      </span>
+                    </div>
+                  ) : (
+                    renderMessageContent(msg.content)
+                  )}
 
                   {/* ComfyUI Progress Bar */}
                   {msg.image_progress && (
