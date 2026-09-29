@@ -13,21 +13,7 @@ export default function App() {
   const { showToast } = useToast();
   const [selectedOllama, setSelectedOllama] = useState('qwen2.5-coder:7b-instruct-q4_K_M');
   const [selectedComfy, setSelectedComfy] = useState('Realistic_Vision_V6.0_NV_B1_fp16.safetensors');
-  const [activeProject, setActiveProject] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem("studio_active_project") || null;
-    } catch {
-      return null;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      if (activeProject) {
-        localStorage.setItem("studio_active_project", activeProject);
-      }
-    } catch {}
-  }, [activeProject]);
+  const [activeProject, setActiveProject] = useState<string | null>(null);
   const [activeFile, setActiveFile] = useState<{ path: string; type: 'code' | 'image' } | null>(null);
   const [activeFileContent, setActiveFileContent] = useState<string>('');
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);

@@ -30,6 +30,19 @@ Local AI Studio is a self-hosted workspace combining local Large Language Models
 
 ---
 
+### Project Snapshots & Backup Management
+
+Local AI Studio provides full project archive management through the collapsible **BACKUPS** panel located in the left sidebar:
+
+- **Isolated Storage:** Backups are stored as `.zip` archives within the `.backups` directory of each project and excluded from recursive archiving, `.git`, `.venv`, and node modules.
+- **Manual Snapshot Creation (`+`):** Clicking the plus button prompts an English confirmation dialog, followed by an animated real-time progress bar during archive compilation.
+- **Instant UI Refresh:** Created archives appear immediately without page reload, formatted with human-readable timestamps (`DD.MM.YYYY HH:MM:SS`) and exact file size in Megabytes (e.g. `(0.12 MB)`).
+- **One-Click Restoration:** Dedicated restore action with confirmation safeguards: clears the project directory while keeping `.backups`, extracts the selected snapshot, and refreshes the project tree automatically.
+- **Snapshot Deletion:** Remove outdated archives directly from the list with confirmation.
+- **Diagnostics & Audit Trail:** Every backup action (`GET list`, `POST create`, `POST restore`, `DELETE`) is captured by the diagnostic **Console** tab with duration, HTTP status, and payload details.
+
+---
+
 ### Supported Project Types & Scaffolding
 
 You can scaffold projects on the fly using natural language commands in the Global Chat (English or Russian), or create directories manually using the New Project button in the sidebar:
@@ -187,6 +200,19 @@ Local AI Studio — это локальная среда разработки и
 - **Агентное редактирование кода:** Ассистент анализирует контекст файлов, создаёт правки и фиксирует снимки истории (Revision History) с возможностью быстрого отката.
 - **Интегрированная генерация изображений:** Встроенный интерфейс создания картинок через ComfyUI с сохранением в папку активного проекта и предпросмотром при наведении.
 - **Защита контекста от переполнения:** MongoDB сохраняет полную историю сообщений и Base64-вложений, тогда как в окно LLM инференса передается скользящее окно с изоляцией тяжелых картинок и лимитом в 16 384 токенов (num_ctx: 16384).
+
+---
+
+### Управление резервными копиями (Backups)
+
+Local AI Studio оснащена встроенной системой снапшотов с отдельной панелью **BACKUPS** в левом сайдбаре:
+
+- **Изолированное хранение:** Архивы сохраняются в поддиректории `.backups` внутри папки конкретного проекта. При создании архива служебные каталоги (`.backups`, `.git`, `.venv`, `node_modules`) автоматически исключаются.
+- **Ручное создание снимка (`+`):** Клик по кнопке открывает модальное окно подтверждения и запускает процесс архивации с анимированным индикатором прогресса (Progress Bar).
+- **Моментальное обновление:** Созданный архив мгновенно появляется в списке без перезагрузки интерфейса с указанием даты/времени (`ДД.ММ.ГГГГ ЧЧ:ММ:СС`) и размера архива в мегабайтах (например, `(0.12 MB)`).
+- **Восстановление проекта в 1 клик:** Иконка восстановления открывает диалог подтверждения с предупреждением. При согласии текущее содержимое проекта очищается (папка `.backups` сохраняется), архив распаковывается, а дерево файлов моментально перечитывается.
+- **Удаление архивов:** Любой архив можно удалить прямо из панели с предварительным подтверждением.
+- **Дебаггинг в Console:** Все вызовы API бэкапов (`GET`, `POST create`, `POST restore`, `DELETE`) детально логируются во вкладку **Console** с фиксацией времени ответа и JSON-пейлоадов.
 
 ---
 
