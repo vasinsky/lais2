@@ -197,6 +197,42 @@ File created: index.html
 File modified: js/app.js
 ```
 
+### Optional: All-in-One Deployment (Everything in Docker)
+
+> **Deployment Options:**  
+> - **Standard / Recommended:** Run `docker compose up -d` to spin up the lightweight studio core (`backend`, `frontend`, `mongo`). It automatically connects to Ollama and ComfyUI running natively on your host machine.
+> - **Optional Alternative:** If you do not have Ollama or ComfyUI installed on your host and want a fully containerized out-of-the-box environment, use the dedicated compose profile `docker-compose.yml.with_ollama_comfy` and `.env.example.with_ollama_comfy`.
+
+#### Quick Launch:
+```bash
+cp .env.example.with_ollama_comfy .env
+docker compose -f docker-compose.yml.with_ollama_comfy up -d
+```
+
+#### Recommended Ollama Models:
+Pull the recommended models directly into the container:
+```bash
+# Coding & Agent file operations (recommended)
+docker exec -it studio_ollama ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+
+# Multilingual Prompt Enrichment & ComfyUI translation
+docker exec -it studio_ollama ollama pull dolphin-llama3:latest
+
+# Vision / Image analysis (optional)
+docker exec -it studio_ollama ollama pull minicpm-v:latest
+```
+
+#### Recommended ComfyUI Checkpoints:
+Place `.safetensors` model weights into `./comfy_models/checkpoints/` (or your mounted path):
+- **SDXL Photorealism:**
+  - **Juggernaut XL v9** (or **RunDiffusion Photo XL**): High dynamic range, natural skin textures, and prompt adherence.
+  - Download from HuggingFace / Civitai: `juggernautXL_v9Rundiffusion.safetensors`
+- **SD 1.5 Photorealism (Fast & Lightweight):**
+  - **Realistic Vision V6.0 B1**: Photorealistic portraits, objects, and low VRAM footprint (~4GB).
+  - Download: `Realistic_Vision_V6.0_NV_B1_fp16.safetensors`
+
+---
+
 ## Русский
 
 > ### ⚠️ ВНИМАНИЕ: ПРОЕКТ НАХОДИТСЯ В СТАДИИ РАЗРАБОТКИ
@@ -350,3 +386,40 @@ File created: css/style.css
 File created: index.html
 File modified: js/app.js
 ```
+
+---
+
+### Опционально: Развертывание «Всё под капотом» (All-in-One)
+
+> **Варианты развертывания:**  
+> - **Основной (рекомендуемый):** Команда `docker compose up -d` поднимает только легкое ядро платформы (`backend`, `frontend`, `mongo`) и подключается к Ollama и ComfyUI, установленным непосредственно на хост-машине.
+> - **Опциональный:** Если вы не хотите ставить Ollama и ComfyUI вручную на хост, используйте профиль `docker-compose.yml.with_ollama_comfy` и конфигурационный файл `.env.example.with_ollama_comfy` для запуска всех 5 сервисов внутри изолированной сети Docker.
+
+#### Быстрый запуск:
+```bash
+cp .env.example.with_ollama_comfy .env
+docker compose -f docker-compose.yml.with_ollama_comfy up -d
+```
+
+#### Загрузка рекомендуемых моделей Ollama:
+Модели загружаются напрямую в запущенный контейнер:
+```bash
+# Кодогенерация и работа агента
+docker exec -it studio_ollama ollama pull qwen2.5-coder:7b-instruct-q4_K_M
+
+# Перевод и подготовка англоязычных промптов для ComfyUI
+docker exec -it studio_ollama ollama pull dolphin-llama3:latest
+
+# Vision-модель для анализа изображений (опционально)
+docker exec -it studio_ollama ollama pull minicpm-v:latest
+```
+
+#### Рекомендуемые чекпоинты ComfyUI:
+Поместите `.safetensors` файлы в смонтированную папку `./comfy_models/checkpoints/`:
+- **SDXL Фотореализм:**
+  - **Juggernaut XL v9** (или **RunDiffusion Photo XL**): максимальная детализация, естественная кожа и точное следование промпту.
+  - Файл: `juggernautXL_v9Rundiffusion.safetensors`
+- **SD 1.5 Фотореализм (быстрые и нетребовательные):**
+  - **Realistic Vision V6.0 B1**: качественные портреты и рендеры предметов при низком потреблении видеопамяти (~4 ГБ).
+  - Файл: `Realistic_Vision_V6.0_NV_B1_fp16.safetensors`
+

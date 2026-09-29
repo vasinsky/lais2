@@ -1,0 +1,122 @@
+# ==============================================================================
+# LOCAL AI STUDIO - DOCKER COMPOSE WITH EMBEDDED OLLAMA & COMFYUI
+#
+# NOTE:
+# This compose setup runs the complete autonomous environment in Docker:
+# 1. backend: FastAPI core & MCP tool server
+# 2. frontend: React / Vite interface
+# 3. mongo: State persistence & conversation memory
+# 4. ollama: LLM engine for coding, scaffolding, and prompt enrichment
+#    - Models are fetched dynamically via Ollama API (/api/tags)
+#    - Mapped to host directory (${OLLAMA_MODELS_DIR}) to persist downloaded weights
+# 5. comfyui: Image generation pipeline
+#    - Model checkpoints are mounted directly into /root/ComfyUI/models/checkpoints
+# ==============================================================================
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: studio_mongo
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - studio_net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: studio_ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      # Host path to persisted Ollama models
+      - ${OLLAMA_MODELS_DIR:-~/.ollama/models}:/root/.ollama/models
+    networks:
+      - studio_net
+    # Uncomment the deploy block below if running on Linux with an NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  comfyui:
+    image: yanwk/comfyui-boot:cu121
+    container_name: studio_comfyui
+    restart: unless-stopped
+    ports:
+      - "${COMFY_PORT:-8188}:8188"
+    volumes:
+      # Mount your host checkpoint folder to ComfyUI checkpoints path
+      - ${COMFY_MODELS_DIR:-./comfy_models}:/root/ComfyUI/models
+      - ${COMFY_OUTPUT_DIR:-./comfy_output}:/root/ComfyUI/output
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188
+    networks:
+      - studio_net
+    # Uncomment the deploy block below if running on Linux with an NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: studio_backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - ${PROJECTS_DIR:-./projects}:/app/projects
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - PROJECTS_ROOT_DIR=/app/projects
+      - MONGO_URI=mongodb://mongo:27017/local_ai_studio
+      - OLLAMA_URL=http://ollama:11434
+      - COMFY_URL=http://comfyui:8188
+      - DEFAULT_CODER_MODEL=${DEFAULT_CODER_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}
+      - TRANSLATOR_MODEL=${TRANSLATOR_MODEL:-dolphin-llama3:latest}
+      - VISION_MODEL=${VISION_MODEL:-minicpm-v:latest}
+    depends_on:
+      - mongo
+      - ollama
+      - comfyui
+    networks:
+      - studio_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: studio_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_BASE_URL=http://localhost:${BACKEND_PORT:-8000}/api
+    depends_on:
+      - backend
+    networks:
+      - studio_net
+
+networks:
+  studio_net:
+    name: studio_net
+    driver: bridge
+
+volumes:
+  mongo_data:
