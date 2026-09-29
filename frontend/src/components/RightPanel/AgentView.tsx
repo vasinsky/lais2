@@ -1,3 +1,6 @@
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import ReactMarkdown from 'react-markdown';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Sparkles, Trash2, Paperclip, Maximize2, Square, Copy, Check, ArrowDownToLine
@@ -264,36 +267,41 @@ export default function AgentView({
 
   const renderMessageContent = (content: string) => {
     const codeBlockRegex = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
-    const parts = [];
+    const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     let match;
 
     while ((match = codeBlockRegex.exec(content)) !== null) {
       if (match.index > lastIndex) {
+        const textChunk = content.substring(lastIndex, match.index);
         parts.push(
-          <span key={`text-${lastIndex}`}>
-            {content.substring(lastIndex, match.index)}
-          </span>
+          <div key={`text-${lastIndex}`} style={{ wordBreak: 'break-word', overflowWrap: 'break-word', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box' }}>
+            <ReactMarkdown>{textChunk}</ReactMarkdown>
+          </div>
         );
       }
-      const lang = match[1] || 'code';
-      const code = match[2];
+      const lang = match[1] || 'javascript';
+      const codeStr = match[2];
       const codeId = `code-${match.index}`;
 
       parts.push(
         <div key={codeId} style={{
-          marginTop: 6,
-          marginBottom: 6,
+          marginTop: 8,
+          marginBottom: 8,
           borderRadius: 6,
           overflow: 'hidden',
+          maxWidth: '100%',
+          minWidth: 0,
+          width: '100%',
+          boxSizing: 'border-box',
           border: '1px solid var(--border-color)',
-          background: '#0d1117'
+          background: '#1e1e1e'
         }}>
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            padding: '3px 8px',
+            padding: '4px 10px',
             backgroundColor: 'rgba(255,255,255,0.05)',
             fontSize: 11,
             color: '#8b949e'
@@ -302,7 +310,7 @@ export default function AgentView({
             <div style={{ display: 'flex', gap: 6 }}>
               {onInsertCodeToEditor && (
                 <button
-                  onClick={() => onInsertCodeToEditor(code)}
+                  onClick={() => onInsertCodeToEditor(codeStr)}
                   title="Insert into active editor"
                   style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }}
                 >
@@ -311,7 +319,7 @@ export default function AgentView({
                 </button>
               )}
               <button
-                onClick={() => handleCopyText(code, codeId)}
+                onClick={() => handleCopyText(codeStr, codeId)}
                 title="Copy code"
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }}
               >
@@ -320,23 +328,49 @@ export default function AgentView({
               </button>
             </div>
           </div>
-          <pre style={{ margin: 0, padding: '8px 10px', overflowX: 'auto', fontSize: 12, color: '#e6edf3', fontFamily: 'monospace' }}>
-            <code>{code}</code>
-          </pre>
+          <SyntaxHighlighter
+            language={lang}
+            style={vscDarkPlus}
+            customStyle={{
+              margin: 0,
+              padding: '10px 12px',
+              fontSize: 12,
+              background: 'transparent',
+              maxWidth: '100%',
+              width: '100%',
+              boxSizing: 'border-box',
+              overflowX: 'hidden',
+            }}
+            wrapLongLines={true}
+            codeTagProps={{
+              style: {
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                overflowWrap: 'break-word',
+              }
+            }}
+          >
+            {codeStr}
+          </SyntaxHighlighter>
         </div>
       );
       lastIndex = match.index + match[0].length;
     }
 
     if (lastIndex < content.length) {
+      const remainingText = content.substring(lastIndex);
       parts.push(
-        <span key={`text-${lastIndex}`}>
-          {content.substring(lastIndex)}
-        </span>
+        <div key={`text-${lastIndex}`} style={{ wordBreak: 'break-word', overflowWrap: 'break-word', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box' }}>
+          <ReactMarkdown>{remainingText}</ReactMarkdown>
+        </div>
       );
     }
 
-    return parts.length > 0 ? parts : content;
+    return parts.length > 0 ? parts : (
+      <div style={{ wordBreak: 'break-word', overflowWrap: 'break-word', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box' }}>
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
   };
 
   return (

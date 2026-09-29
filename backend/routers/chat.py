@@ -432,7 +432,7 @@ async def chat_stream(payload: ChatPayload):
             )
 
             # Формирование безопасного контекста для инференса (БД остается нетронутой)
-            processed_messages = [{"role": "system", "content": system_instruction}]
+            processed_messages = [{"role": "system", "content": "You are a helpful, expert AI assistant. Always format responses in structured Markdown with headings, bullet points, and clear paragraphs."},{"role": "system", "content": system_instruction}]
             
             history_msgs = payload.messages[:-1]
             if len(history_msgs) > 12:
