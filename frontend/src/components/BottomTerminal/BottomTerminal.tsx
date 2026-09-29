@@ -41,7 +41,24 @@ export default function BottomTerminal({
       const updated = consoleLogger.getLogs(activeProject);
       setLogs([...updated]);
     });
-    return unsubscribe;
+
+    let es: EventSource | null = null;
+    if (activeProject) {
+      es = new EventSource(`/api/projects/${encodeURIComponent(activeProject)}/events`);
+      es.onmessage = (ev) => {
+        try {
+          const item = JSON.parse(ev.data);
+          consoleLogger.log(item);
+        } catch (_) {}
+      };
+    }
+
+    return () => {
+      unsubscribe();
+      if (es) {
+        es.close();
+      }
+    };
   }, [activeProject]);
 
   useEffect(() => {
@@ -342,7 +359,9 @@ export default function BottomTerminal({
                 backgroundColor: '#0d1117',
                 fontFamily: 'Menlo, Monaco, "Courier New", monospace',
                 fontSize: 12,
-                color: '#c9d1d9'
+                color: '#c9d1d9',
+                userSelect: 'text',
+                WebkitUserSelect: 'text'
               }}
             >
               {logs.length === 0 ? (
@@ -423,7 +442,10 @@ export default function BottomTerminal({
                           wordBreak: 'break-word',
                           overflowWrap: 'anywhere',
                           overflowX: 'hidden',
-                          color: '#8b949e'
+                          color: '#8b949e',
+                          userSelect: 'text',
+                          WebkitUserSelect: 'text',
+                          cursor: 'text'
                         }}
                       >
                         {JSON.stringify(log.payload, null, 2)}

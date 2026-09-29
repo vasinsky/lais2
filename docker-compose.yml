@@ -8,6 +8,18 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  mcp-server:
+    build: ./mcp-server
+    container_name: studio_mcp
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      - PROJECTS_ROOT_DIR=/projects
+    volumes:
+      - ${PROJECTS_DIR:-./projects}:/projects
+      - ./mcp-server/server.py:/app/server.py
+
   backend:
     build: ./backend
     container_name: studio_backend

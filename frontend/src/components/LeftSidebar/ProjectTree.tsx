@@ -32,7 +32,7 @@ interface ProjectTreeProps {
   onHistoryCleared: () => void;
 }
 
-type ModalType = 'create-file' | 'create-folder' | 'delete-file' | 'delete-project' | null;
+type ModalType = 'create-project' | 'create-file' | 'create-folder' | 'delete-file' | 'delete-project' | null;
 
 interface ModalState {
   type: ModalType;

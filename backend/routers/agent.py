@@ -1,3 +1,4 @@
+from services.mcp_client import mcp_client
 import bson
 import os
 import re
@@ -21,7 +22,6 @@ DEFAULT_CODER_MODEL = os.getenv("DEFAULT_CODER_MODEL", "qwen2.5-coder:7b-instruc
 from comfy_service import generate_image_stream, COMFYUI_HTTP
 from routers.projects import get_base_dir
 
-
 def extract_custom_image_path(prompt: str) -> Optional[str]:
     patterns = [
         r"(?:в\s+папку|в\s+папке|в\s+директорию|path:|folder:)\s+([a-zA-Z0-9_\-/\.]+)",
@@ -30,7 +30,7 @@ def extract_custom_image_path(prompt: str) -> Optional[str]:
     for p in patterns:
         m = re.search(p, prompt, re.IGNORECASE)
         if m:
-            clean_path = m.group(1).strip(" \t\r\n\x27\"").strip("/\\")
+            clean_path = m.group(1).strip(" \t\r\n'\"/\\")
             if clean_path and ".." not in clean_path:
                 return clean_path
     return None
@@ -125,57 +125,52 @@ async def clear_agent_history(project_name: str):
     await database.db.agent_sessions.delete_one({"project_name": project_name})
     return {"status": "cleared", "project_name": project_name}
 
+@router.get("/{project_name}/stats")
+async def get_agent_stats(project_name: str):
+    if database.db is None:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    session = await database.db.agent_sessions.find_one({"project_name": project_name})
+    if not session:
+        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
+    raw_bytes = len(bson.BSON.encode(session))
+    msgs = session.get("messages", [])
+    return {
+        "msg_count": len(msgs),
+        "size_bytes": raw_bytes,
+        "size_kb": round(raw_bytes / 1024, 2)
+    }
+
 @router.post("/execute")
 async def execute_agent_task(task: AgentTask):
     target_model = task.model or DEFAULT_CODER_MODEL
     proj_path = os.path.abspath(os.path.join(WORKSPACE_DIR, task.project_name))
-    if not os.path.exists(proj_path):
-        raise HTTPException(status_code=404, detail="Project not found")
+    os.makedirs(proj_path, exist_ok=True)
 
     lower_prompt = task.prompt.lower().strip()
 
-    if any(k in lower_prompt for k in ["создай проект", "создать проект", "новый проект", "create project", "new project"]):
-        ignore_msg = f"Вы уже находитесь в контексте проекта `{task.project_name}`. Для создания нового проекта используйте вкладку Global Chat или кнопку «+» в левой панели."
-        async def ignore_stream():
-            yield {"data": json.dumps({"type": "meta", "model": target_model})}
-            yield {"data": json.dumps({"message": {"content": ignore_msg}})}
-        return EventSourceResponse(ignore_stream())
+    try:
+        mcp_items = await mcp_client.list_files(task.project_name)
+        file_tree = [item["path"] for item in mcp_items if not item.get("is_dir", False)]
+    except Exception:
+        file_tree = get_clean_project_files(proj_path)
 
-    file_tree = get_clean_project_files(proj_path)
+    prompt_files = re.findall(r"[a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+", task.prompt)
+    clean_prompt_files = []
+    for cf in prompt_files:
+        c = cf.strip("`'\".,;:()[]{}<> \t\n")
+        if c and not c.endswith((".com", ".org", ".net", ".ru", ".io")):
+            clean_prompt_files.append(c)
+    clean_prompt_files = list(dict.fromkeys(clean_prompt_files))
 
+    is_project_scaffold = any(k in lower_prompt for k in ["проект", "project", "архитектур", "структур", "каркас"])
     target_file = None
-    ambiguous_files = []
-    # Проверяем прямое упоминание файлов из дерева в тексте запроса
-    mentioned_files = []
-    for f in file_tree:
-        base_f = os.path.basename(f).lower()
-        if base_f in lower_prompt or f.lower() in lower_prompt:
-            mentioned_files.append(f)
 
-    if len(mentioned_files) == 1:
-        # Ровно один файл - стримим напрямую в этот файл в редакторе
-        target_file = mentioned_files[0]
-    elif len(mentioned_files) > 1:
-        # Несколько файлов (например index.html И style.css) - мультифайловый режим через [FILE: ...]
+    if is_project_scaffold or len(clean_prompt_files) > 1:
         target_file = None
-    elif task.active_file_path and any(k in lower_prompt for k in ["этот файл", "текущий файл", "в файл", "в него"]):
+    elif len(clean_prompt_files) == 1:
+        target_file = clean_prompt_files[0]
+    elif task.active_file_path and any(k in lower_prompt for k in ["этот файл", "текущий", "измени", "дополни", "исправь", "в него"]):
         target_file = task.active_file_path
-    elif any(k in lower_prompt for k in ["наполни", "заполни", "сделай", "создай", "сайт"]):
-        for cand in ["index.html", "app/index.html", "main.py", "app.py"]:
-            if cand in file_tree:
-                target_file = cand
-                break
-
-    if ambiguous_files:
-        msg_reply = (
-            f"В проекте найдено несколько файлов с похожим именем:\n" +
-            "\n".join([f"- `{f}`" for f in ambiguous_files]) +
-            "\n\nПожалуйста, уточните полный путь к файлу."
-        )
-        async def ambiguous_stream():
-            yield {"data": json.dumps({"type": "meta", "model": target_model})}
-            yield {"data": json.dumps({"message": {"content": msg_reply}})}
-        return EventSourceResponse(ambiguous_stream())
 
     cursor = database.db.system_prompts.find({"is_active": True})
     active_rules = []
@@ -192,7 +187,7 @@ async def execute_agent_task(task: AgentTask):
     now_iso = datetime.datetime.utcnow().isoformat()
     await database.db.agent_sessions.update_one(
         {"project_name": task.project_name},
-        {"$push": {"messages": {             "role": "user",             "content": task.prompt,             "images": task.images,             "created_at": now_iso         }}, "$set": {"updated_at": now_iso}},
+        {"$push": {"messages": {"role": "user", "content": task.prompt, "images": task.images, "created_at": now_iso}}, "$set": {"updated_at": now_iso}},
         upsert=True
     )
 
@@ -211,31 +206,39 @@ async def execute_agent_task(task: AgentTask):
                     pass
 
             if target_file:
+                existing_file_content = ""
+                full_target_p = os.path.join(proj_path, target_file)
+                if os.path.exists(full_target_p):
+                    try:
+                        with open(full_target_p, "r", encoding="utf-8") as ef:
+                            existing_file_content = ef.read()
+                    except Exception:
+                        pass
+
+                context_extra = f"\nCurrent content of {target_file}:\n{existing_file_content}\n" if existing_file_content else ""
+
                 system_instruction = (
-                    f"You are directly editing the file '{target_file}' in project '{task.project_name}'.\n"
+                    f'You are editing the file "{target_file}" in project "{task.project_name}".\n'
+                    f"{context_extra}"
                     f"Global Directives:\n{global_rules_text}\n\n"
                     "CRITICAL INSTRUCTIONS:\n"
-                    "1. Return ONLY the raw file source code.\n"
-                    "2. Do NOT write any greeting, introduction, conversational phrases, or explanations.\n"
-                    "3. Do NOT wrap code in markdown backticks (no ```html, no ```).\n"
-                    "4. Output complete, valid, high-quality production code from line 1 to the end."
+                    "1. Return ONLY the complete raw source code for this file.\n"
+                    "2. NO explanations, NO greetings, NO markdown wrappers (do NOT use ```).\n"
+                    "3. Start immediately from line 1 of code."
                 )
             else:
                 system_instruction = (
-                    f"You are an autonomous Senior Developer in project: '{task.project_name}'.\n"
+                    f'You are a Senior Project Architect for project: "{task.project_name}".\n'
                     f"Global Directives:\n{global_rules_text}\n\n"
-                    f"Project Files:\n{json.dumps(file_tree[:150], indent=2)}\n"
-                    f"Active file: {task.active_file_path or 'None'}\n"
-                    "Always converse and explain in fluent RUSSIAN.\n"
-                    "CRITICAL FILE GENERATION INSTRUCTIONS:\n"
-                    "1. DO NOT write any introductory plan, conversational outline, or long descriptions.\n"
-                    "2. You MUST immediately start writing the files using this exact tag format:\n"
-                    "[FILE: relative/path/to/filename.ext]\n"
-                    "complete code here\n"
+                    f"Current Project Files: {json.dumps(file_tree[:150])}\n\n"
+                    "CRITICAL MULTI-FILE SPECIFICATION:\n"
+                    "1. Produce ALL necessary project files and directories requested.\n"
+                    "2. For EVERY file, output strictly in this format:\n"
+                    "[FILE: path/to/filename.ext]\n"
+                    "complete code\n"
                     "[/FILE]\n"
-                    "3. Each requested file (e.g. index.html, style.css) MUST have its own [FILE: ...] block.\n"
-                    "4. Put all CSS inside style.css and HTML inside index.html.\n"
-                    "5. After all [FILE] blocks are finished, write 1-2 summary sentences in Russian."
+                    "3. DO NOT output conversational text, greetings, or descriptions.\n"
+                    "4. Output only valid [FILE: ...] [/FILE] blocks."
                 )
 
             dialog_history = [{"role": "system", "content": system_instruction}]
@@ -243,44 +246,27 @@ async def execute_agent_task(task: AgentTask):
                 dialog_history.append({"role": m["role"], "content": m["content"]})
             dialog_history.append({"role": "user", "content": user_agent_prompt})
 
-            # --- 1. Проверяем необходимость генерации изображения ---
-            # --- 1. Проверяем необходимость генерации изображения ---
             img_intent = detect_agent_image_prompt(task.prompt)
             generated_image_names = []
             if img_intent:
-                yield {"data": json.dumps({"message": {"content": "🎨 Генерирую изображение через ComfyUI...\n"}})}
+                yield {"data": json.dumps({"message": {"content": "🎨 Generating image via ComfyUI...\n"}})}
                 ckpt = task.comfy_checkpoint or os.getenv("COMFYUI_DEFAULT_CHECKPOINT", "Realistic_Vision_V6.0_NV_B1_fp16.safetensors")
                 eng_desc = await translate_text_to_english(img_intent, client)
                 custom_subpath = extract_custom_image_path(task.prompt)
                 ts = int(datetime.datetime.utcnow().timestamp())
-                if custom_subpath:
-                    if custom_subpath.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                        img_rel_path = custom_subpath
-                    else:
-                        img_rel_path = os.path.join(custom_subpath, f"image_{ts}.png")
-                else:
-                    img_rel_path = f"image_{ts}.png"
-
+                img_rel_path = custom_subpath if (custom_subpath and custom_subpath.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))) else (os.path.join(custom_subpath, f"image_{ts}.png") if custom_subpath else f"image_{ts}.png")
                 img_filename = img_rel_path
                 img_path = os.path.join(get_base_dir(), task.project_name, img_rel_path)
-                
+
                 try:
                     async for event in generate_image_stream(eng_desc, ckpt):
                         ev_type = event.get("type") if isinstance(event, dict) else ""
                         if ev_type == "image_progress":
-                            yield {"data": json.dumps({
-                                "type": "image_progress",
-                                "step": event.get("step", 0),
-                                "total": event.get("total", 20),
-                                "percent": event.get("percent", 0),
-                                "status": event.get("status", "Sampling...")
-                            })}
+                            yield {"data": json.dumps({"type": "image_progress", "step": event.get("step", 0), "total": event.get("total", 20), "percent": event.get("percent", 0)})}
                         elif ev_type == "image_complete":
                             raw_name = event.get("filename")
                             subfolder = event.get("subfolder", "")
-                            v_url = f"{COMFYUI_HTTP}/view?filename={raw_name}"
-                            if subfolder:
-                                v_url += f"&subfolder={subfolder}"
+                            v_url = f"{COMFYUI_HTTP}/view?filename={raw_name}" + (f"&subfolder={subfolder}" if subfolder else "")
                             async with httpx.AsyncClient(timeout=30.0) as img_client:
                                 r = await img_client.get(v_url)
                                 if r.status_code == 200:
@@ -288,45 +274,20 @@ async def execute_agent_task(task: AgentTask):
                                     with open(img_path, "wb") as f_img:
                                         f_img.write(r.content)
                                     generated_image_names.append(img_filename)
-                                    yield {"data": json.dumps({
-                                        "type": "file_saved",
-                                        "path": img_filename,
-                                        "file_path": img_filename,
-                                        "revision": {"content": f"[Binary image: {img_filename}]", "timestamp": "now"}
-                                    })}
-                                    yield {"data": json.dumps({"message": {"content": f"\n✅ Изображение сгенерировано и сохранено как `{img_filename}`\n"}})}
+                                    yield {"data": json.dumps({"type": "file_saved", "path": img_filename, "file_path": img_filename, "revision": {"content": f"[Binary image: {img_filename}]", "timestamp": "now"}})}
                 except Exception as ex:
-                    yield {"data": json.dumps({"message": {"content": f"⚠️ Ошибка ComfyUI: {str(ex)}\n"}})}
-
-            # --- 2. Контекст файлов изображений для кодера ---
-            if generated_image_names:
-                assets_list = ", ".join(f"\"{name}\"" for name in generated_image_names)
-                dialog_history.append({
-                    "role": "system",
-                    "content": (
-                        f"CRITICAL REQUIREMENT FOR IMAGES: The following image assets were just generated and saved in the project root: [{assets_list}].\n"
-                        f"You MUST use ONLY these exact filenames in your <img> src tags (e.g. <img src=\"{generated_image_names[0]}\" alt=\"cat\">) and CSS url().\n"
-                        f"DO NOT invent placeholders like kitten.jpg, placeholder.png, cat.jpg or any other non-existent files!"
-                    )
-                })
+                    yield {"data": json.dumps({"message": {"content": f"ComfyUI error: {str(ex)}\n"}})}
 
             payload = {
                 "model": target_model,
                 "messages": dialog_history,
                 "stream": True,
-                "options": {"num_ctx": 16384, "temperature": 0.2 if target_file else 0.4}
+                "options": {"num_ctx": 16384, "temperature": 0.2 if target_file else 0.3}
             }
 
             current_file = target_file
-            # Поддержка [FILE: path], ```ext:path, ### path, **path**, Файл `path`:
-            open_tag_re = re.compile(
-                r"\[FILE:\s*([^\]]+)\]|"
-                r"```[a-zA-Z0-9_+-]*\s*(?:<!--|/\*|//|#)?\s*([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)|"
-                r"(?:###|#|\*\*|`|(?:файл|file):?\s*`?)([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)",
-                re.IGNORECASE
-            )
+            open_tag_re = re.compile(r"\[FILE:\s*([^\]]+)\]|```[a-zA-Z0-9_+-]*\s*(?:<!--|/\*|//|#)?\s*([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)", re.IGNORECASE)
             close_tag_re = re.compile(r"\[/FILE\]|```\s*$", re.MULTILINE)
-            
             raw_full_output = ""
             buf = ""
 
@@ -336,12 +297,8 @@ async def execute_agent_task(task: AgentTask):
 
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as resp:
                     is_first_chunk = True
-                    in_closing_comment = False
                     code_started = False
                     prefix_buf = ""
-
-                    if target_file:
-                        yield {"data": json.dumps({"message": {"content": f"⚡ Редактирую файл `{target_file}`...\n"}})}
 
                     async for chunk in resp.aiter_lines():
                         if not chunk:
@@ -354,12 +311,6 @@ async def execute_agent_task(task: AgentTask):
                             raw_full_output += token
 
                             if target_file:
-                                # Если уже начался завершающий комментарий модели, отправляем его в чат
-                                if in_closing_comment:
-                                    yield {"data": json.dumps({"message": {"content": token}})}
-                                    continue
-
-                                # Буферизуем первые токены для очистки от открывающих ```html / ```
                                 if not code_started:
                                     prefix_buf += token
                                     if len(prefix_buf) < 15 and ("`" in prefix_buf or "\n" in prefix_buf):
@@ -368,42 +319,19 @@ async def execute_agent_task(task: AgentTask):
                                     prefix_buf = ""
                                     code_started = True
                                     if clean_prefix:
-                                        yield {"data": json.dumps({
-                                            "type": "stream_code",
-                                            "path": target_file,
-                                            "chunk": clean_prefix,
-                                            "is_start": is_first_chunk
-                                        })}
+                                        yield {"data": json.dumps({"type": "stream_code", "path": target_file, "chunk": clean_prefix, "is_start": is_first_chunk})}
                                         is_first_chunk = False
                                     continue
 
-                                # Проверяем закрывающие ``` или начало русских пояснений
-                                if "```" in token or (("\n\n" in token or "\n" in token) and any(word in token.lower() for word in ["этот", "код", "файл", "данный", "мы ", "я "])):
+                                if "```" in token:
                                     parts = re.split(r"```", token, maxsplit=1)
-                                    code_part = parts[0]
-                                    comment_part = parts[1] if len(parts) > 1 else ""
-                                    if code_part:
-                                        yield {"data": json.dumps({
-                                            "type": "stream_code",
-                                            "path": target_file,
-                                            "chunk": code_part,
-                                            "is_start": is_first_chunk
-                                        })}
-                                        is_first_chunk = False
-                                    in_closing_comment = True
-                                    if comment_part.strip():
-                                        yield {"data": json.dumps({"message": {"content": comment_part}})}
-                                    continue
+                                    if parts[0]:
+                                        yield {"data": json.dumps({"type": "stream_code", "path": target_file, "chunk": parts[0], "is_start": is_first_chunk})}
+                                    break
 
-                                yield {"data": json.dumps({
-                                    "type": "stream_code",
-                                    "path": target_file,
-                                    "chunk": token,
-                                    "is_start": is_first_chunk
-                                })}
+                                yield {"data": json.dumps({"type": "stream_code", "path": target_file, "chunk": token, "is_start": is_first_chunk})}
                                 is_first_chunk = False
                             else:
-                                # Режим работы с несколькими файлами через теги [FILE: ...]
                                 buf += token
                                 if not current_file:
                                     m = open_tag_re.search(buf)
@@ -411,12 +339,7 @@ async def execute_agent_task(task: AgentTask):
                                         current_file = (m.group(1) or m.group(2)).strip().strip("/\\ ")
                                         buf = ""
                                         is_first_chunk = True
-                                        yield {"data": json.dumps({"message": {"content": f"\n📝 Обновляю файл `{current_file}`...\n"}})}
-                                    else:
-                                        if len(buf) > 40:
-                                            out_part = buf[:-20]
-                                            buf = buf[-20:]
-                                            yield {"data": json.dumps({"message": {"content": out_part}})}
+                                        yield {"data": json.dumps({"type": "stream_target", "file_path": current_file})}
                                 else:
                                     if close_tag_re.search(buf):
                                         current_file = None
@@ -433,50 +356,66 @@ async def execute_agent_task(task: AgentTask):
                             pass
 
                 if prefix_buf and target_file and not code_started:
-                    clean_prefix = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", prefix_buf.lstrip())
-                    if clean_prefix:
-                        yield {"data": json.dumps({
-                            "type": "stream_code",
-                            "path": target_file,
-                            "chunk": clean_prefix,
-                            "is_start": is_first_chunk
-                        })}
-
-                if buf and not current_file:
-                    yield {"data": json.dumps({"message": {"content": buf}})}
+                    clean_p = re.sub(r"^```[a-zA-Z0-9_-]*\n?", "", prefix_buf.lstrip())
+                    if clean_p:
+                        yield {"data": json.dumps({"type": "stream_code", "path": target_file, "chunk": clean_p, "is_start": is_first_chunk})}
             except Exception as e:
                 yield {"data": json.dumps({"error": str(e)})}
 
-            # --- 3. Итоговая запись файлов на диск и сохранение снимков ---
             files_to_save = []
             if target_file and raw_full_output.strip():
-                files_to_save.append((target_file, raw_full_output))
+                clean_body = raw_full_output.strip()
+                if clean_body.startswith("```"):
+                    lines = clean_body.splitlines()
+                    if len(lines) > 2 and lines[-1].strip() == "```":
+                        clean_body = chr(10).join(lines[1:-1])
+                files_to_save.append((target_file, clean_body))
             else:
                 matches = re.findall(r"\[FILE:\s*([^\]]+)\]\s*(.*?)\s*\[/FILE\]", raw_full_output, re.DOTALL)
                 if not matches:
-                    matches = re.findall(r"(?:###|#)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+).*?```[a-zA-Z0-9_\-]*\s*\n(.*?)\n```", raw_full_output, re.DOTALL)
+                    matches = re.findall(r"(?:###|#)\s*([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+).*?```[a-zA-Z0-9_\-]*\s*\n(.*?)\n```", raw_full_output, re.DOTALL)
                 files_to_save = matches
 
-            saved_paths = []
+            report_lines = []
+            created_dirs = set()
+
             for rpath_raw, code_body in files_to_save:
                 rpath = rpath_raw.strip().strip("/\\ ")
                 if not rpath or "." not in rpath:
                     continue
+
+                full_disk_path = os.path.abspath(os.path.join(WORKSPACE_DIR, task.project_name, rpath))
+                existed_before = os.path.exists(full_disk_path)
+
+                dir_name = os.path.dirname(rpath)
+                if dir_name and dir_name not in created_dirs:
+                    full_dir_path = os.path.dirname(full_disk_path)
+                    if not os.path.exists(full_dir_path):
+                        os.makedirs(full_dir_path, exist_ok=True)
+                        created_dirs.add(dir_name)
+                        report_lines.append(f"Directory created: {dir_name}/")
+
                 body = code_body.strip()
                 if body.startswith("```"):
                     lines = body.splitlines()
                     if len(lines) > 2 and lines[-1].strip() == "```":
                         body = chr(10).join(lines[1:-1])
 
-                dpath = os.path.abspath(os.path.join(WORKSPACE_DIR, task.project_name, rpath))
-                os.makedirs(os.path.dirname(dpath), exist_ok=True)
-                with open(dpath, "w", encoding="utf-8") as f:
-                    f.write(body)
+                # Удаляем мусорные строки ошибок MCP-чтения, если они прилипли к коду
+                if "Error executing tool read_file" in body:
+                    clean_lines = [ln for ln in body.splitlines() if not ln.strip().startswith("Error executing tool read_file")]
+                    body = "\n".join(clean_lines).strip()
+
+                try:
+                    await mcp_client.write_file(task.project_name, rpath, body)
+                except Exception:
+                    os.makedirs(os.path.dirname(full_disk_path), exist_ok=True)
+                    with open(full_disk_path, "w", encoding="utf-8") as f:
+                        f.write(body)
 
                 now_dt = datetime.datetime.utcnow()
                 t_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-                
-                # Записываем в память роутера проектов для мгновенного отображения в UI
+
                 try:
                     from routers.projects import record_file_revision
                     in_mem_rev = record_file_revision(task.project_name, rpath, body, source="agent")
@@ -491,7 +430,7 @@ async def execute_agent_task(task: AgentTask):
                     "created_at": now_dt.isoformat(),
                     "timestamp": t_str
                 })
-                
+
                 rev_payload = in_mem_rev if in_mem_rev else {
                     "id": str(ins.inserted_id),
                     "timestamp": t_str,
@@ -505,75 +444,24 @@ async def execute_agent_task(task: AgentTask):
                     "path": rpath.lstrip("./\\ "),
                     "revision": rev_payload
                 })}
-                saved_paths.append(rpath)
 
-            files_joined = ", ".join(saved_paths)
-            summary = f"Сгенерированы файлы: {files_joined}" if saved_paths else raw_full_output
+                if existed_before:
+                    report_lines.append(f"File modified: {rpath}")
+                else:
+                    report_lines.append(f"File created: {rpath}")
+
+            final_report = "\n".join(report_lines) if report_lines else "No file operations performed."
+            yield {"data": json.dumps({"message": {"content": f"\n```text\n{final_report}\n```\n"}})}
+
             await database.db.agent_sessions.update_one(
                 {"project_name": task.project_name},
                 {"$push": {"messages": {
                     "role": "assistant",
-                    "content": summary,
+                    "content": final_report,
                     "modelUsed": target_model,
-                    "saved_files": saved_paths,
+                    "saved_files": [r.strip().strip("/\\ ") for r, _ in files_to_save],
                     "created_at": datetime.datetime.utcnow().isoformat()
                 }}}
             )
 
     return EventSourceResponse(event_generator())
-
-@router.delete("/{project_name}/messages/{index}")
-async def delete_agent_message(project_name: str, index: int):
-    if database.db is None:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    
-    session = await database.db.agent_sessions.find_one({"project_name": project_name})
-    if not session or "messages" not in session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    messages = session.get("messages", [])
-    if index < 0 or index >= len(messages):
-        raise HTTPException(status_code=400, detail="Invalid message index")
-    
-    messages.pop(index)
-    await database.db.agent_sessions.update_one(
-        {"project_name": project_name},
-        {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
-    )
-    return {"status": "success", "remaining": len(messages)}
-
-@router.delete("/{project_name}/messages/{index}")
-async def delete_agent_message(project_name: str, index: int):
-    if database.db is None:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    
-    session = await database.db.agent_sessions.find_one({"project_name": project_name})
-    if not session or "messages" not in session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    messages = session.get("messages", [])
-    if index < 0 or index >= len(messages):
-        raise HTTPException(status_code=400, detail="Invalid message index")
-    
-    messages.pop(index)
-    await database.db.agent_sessions.update_one(
-        {"project_name": project_name},
-        {"$set": {"messages": messages, "updated_at": datetime.datetime.utcnow().isoformat()}}
-    )
-    return {"status": "success", "remaining": len(messages)}
-
-@router.get("/{project_name}/stats")
-async def get_agent_stats(project_name: str):
-    if database.db is None:
-        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
-    session = await database.db.agent_sessions.find_one({"project_name": project_name})
-    if not session:
-        return {"msg_count": 0, "size_kb": 0.0, "size_bytes": 0}
-    
-    raw_bytes = len(bson.BSON.encode(session))
-    msgs = session.get("messages", [])
-    return {
-        "msg_count": len(msgs),
-        "size_bytes": raw_bytes,
-        "size_kb": round(raw_bytes / 1024, 2)
-    }

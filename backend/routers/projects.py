@@ -1,3 +1,4 @@
+from services.mcp_client import mcp_client
 import subprocess
 import socket
 import json
@@ -368,16 +369,20 @@ async def get_raw_file(name: str, path: str = Query(...)):
 
 @router.get("/{name}/file")
 async def get_file_content(name: str, path: str = Query(...)):
-    cur_ws = get_base_dir()
-    file_path = os.path.join(cur_ws, name, path)
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        content = await mcp_client.read_file(name, path)
         return {"content": content, "path": path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as mcp_err:
+        cur_ws = get_base_dir()
+        file_path = os.path.join(cur_ws, name, path)
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {"content": content, "path": path}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 class SaveFileRequest(BaseModel):
     path: str
@@ -408,14 +413,16 @@ async def create_new_project(payload: CreateProjectPayload):
 
 @router.post("/{name}/file")
 async def save_file_content(name: str, payload: SaveFileRequest):
-    cur_ws = get_base_dir()
-    proj_path = os.path.join(cur_ws, name)
-    os.makedirs(proj_path, exist_ok=True)
-    file_path = os.path.join(proj_path, payload.path)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(payload.content)
+    try:
+        await mcp_client.write_file(name, payload.path, payload.content)
+    except Exception as mcp_err:
+        cur_ws = get_base_dir()
+        proj_path = os.path.join(cur_ws, name)
+        os.makedirs(proj_path, exist_ok=True)
+        file_path = os.path.join(proj_path, payload.path)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(payload.content)
 
     hist_key = f"{name}:{payload.path}"
     if hist_key not in _file_history_store:
@@ -524,23 +531,27 @@ async def create_project_directory(name: str, payload: CreateDirectoryPayload):
 
 @router.delete("/{name}/file")
 async def delete_project_file(name: str, path: str = Query(...)):
-    base_dir = get_base_dir()
-    proj_root = os.path.realpath(os.path.join(base_dir, name))
-    target_path = os.path.realpath(os.path.join(proj_root, path.lstrip("/")))
-    
-    if not target_path.startswith(proj_root):
-        raise HTTPException(status_code=400, detail="Invalid path traversal")
-    if not os.path.exists(target_path):
-        raise HTTPException(status_code=404, detail="File or folder not found")
-        
     try:
-        if os.path.isdir(target_path):
-            shutil.rmtree(target_path)
-        else:
-            os.remove(target_path)
+        await mcp_client.delete_file(name, path)
         return {"status": "success", "deleted": path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as mcp_err:
+        base_dir = get_base_dir()
+        proj_root = os.path.realpath(os.path.join(base_dir, name))
+        target_path = os.path.realpath(os.path.join(proj_root, path.lstrip("/")))
+        
+        if not target_path.startswith(proj_root):
+            raise HTTPException(status_code=400, detail="Invalid path traversal")
+        if not os.path.exists(target_path):
+            raise HTTPException(status_code=404, detail="File or folder not found")
+            
+        try:
+            if os.path.isdir(target_path):
+                shutil.rmtree(target_path)
+            else:
+                os.remove(target_path)
+            return {"status": "success", "deleted": path}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{name}/move")
 async def move_project_file(name: str, payload: MoveItemPayload):
@@ -944,3 +955,21 @@ async def compose_down(name: str):
         return {"status": "stopped", "output": res.stdout}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{name}/events")
+async def stream_project_events(name: str):
+    from services.event_bus import project_event_bus
+    from sse_starlette.sse import EventSourceResponse
+
+    async def event_generator():
+        q = project_event_bus.subscribe(name)
+        try:
+            while True:
+                data = await q.get()
+                yield {"data": json.dumps(data)}
+        except asyncio.CancelledError:
+            pass
+        finally:
+            project_event_bus.unsubscribe(name, q)
+
+    return EventSourceResponse(event_generator())

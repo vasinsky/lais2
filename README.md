@@ -142,6 +142,34 @@ Open `http://localhost:3000` in your browser.
 
 ---
 
+
+---
+
+### Model Context Protocol (MCP) File Operations
+
+Local AI Studio utilizes the Model Context Protocol (MCP) tool standard (`services/mcp_client.py`) for decoupled, containerized workspace manipulation. When tasks are executed through the **Project Agent**, LLM completions are parsed into deterministic file-system actions (`write_file`, `read_file`, `list_files`).
+
+- **Natural Language Translation to MCP Calls:** You do not need to invoke JSON schemas or tool names manually. Natural requests are automatically mapped to targeted MCP write/update events.
+- **Streaming & Live UI Synchronization:** Modifying or generating files triggers streaming updates directly into open Monaco editor tabs, followed by disk persistence and revision history snapshots.
+- **Structured Operation Logging:** File operations return non-conversational reports in concise standard output syntax (`File created`, `File modified`, `Directory created`).
+
+#### Example Prompts for File Agent & MCP Server
+
+| Goal | Example Natural Language Prompt | MCP Actions & Result |
+| :--- | :--- | :--- |
+| **Create a new file** | `Create contact.html with a feedback form, modern CSS styling, and a link back to index.html` | Inspects workspace via `list_files`, opens a new editor tab, streams code, and writes file via `write_file`. |
+| **Targeted single-file edit** | `Update index.html to add a three-column features section and hero banner` | Reads active context, replaces/updates contents directly in `index.html` without affecting other assets. |
+| **Multi-file project scaffolding** | `Scaffold a responsive landing page with index.html, css/style.css, and js/app.js` | Emits distinct `[FILE: path]...[/FILE]` blocks, automatically creates missing subfolders, and commits multiple files. |
+| **Generate & link visual assets** | `Generate an illustration of a mechanical keyboard and embed it into index.html` | Dispatches image generation task to ComfyUI, saves binary to project root, and links asset accurately in HTML tags. |
+
+**Standard Output Report:**
+```text
+Directory created: css/
+File created: css/style.css
+File created: index.html
+File modified: js/app.js
+```
+
 ## Русский
 
 > ### ⚠️ ВНИМАНИЕ: ПРОЕКТ НАХОДИТСЯ В СТАДИИ РАЗРАБОТКИ
@@ -241,3 +269,30 @@ Local AI Studio — это локальная среда разработки и
    `docker compose up -d`
 
 Студия откроется по адресу `http://localhost:3000`.
+
+---
+
+### Работа с файловой системой через Model Context Protocol (MCP)
+
+В Local AI Studio операции с файлами проекта изолированы через протокол Model Context Protocol (MCP) с помощью сервиса `services/mcp_client.py`. Агент (**Project Agent**) принимает инструкции на естественном языке, а бэкенд транслирует их в вызовы MCP (`write_file`, `read_file`, `list_files`).
+
+- **Естественный язык без ручного вызова функций:** Пользователю не требуется формировать JSON-вызовы или перечислять системные аргументы `write_file`. Система самостоятельно выделяет пути к файлам и контекст задачи.
+- **Интерактивный стриминг в редактор:** При генерации или изменении файла в интерфейсе автоматически активируется соответствующая вкладка, отображается посимвольный вывод кода, а после завершения создаётся моментальный снимок версии (File History).
+- **Лаконичный отчёт вместо диалога:** Ассистент не выводит лишних рассуждений или вводных слов, возвращая строгий технический отчёт о статусе операций.
+
+#### Примеры промптов для работы с файлами
+
+| Задача | Пример промпта для Project Agent | Поведение системы и MCP |
+| :--- | :--- | :--- |
+| **Создание нового файла** | `Создай страницу about.html с формой контактов, стилями и ссылкой на index.html` | Проверяет дерево файлов, открывает новую вкладку `about.html`, генерирует код и сохраняет через `write_file`. Открытый `index.html` не перезаписывается. |
+| **Точечное изменение файла** | `Измени index.html: добавь блок преимуществ из трёх колонок и подвал сайта` | Обновляет код текущего файла на лету, сохраняет изменения и фиксирует снимок в истории версий. |
+| **Генерация каркаса из нескольких файлов** | `Создай проект портфолио с файлами index.html, css/style.css и js/main.js` | Генерирует блоки `[FILE: ...]`, автоматически создаёт папки `css/` и `js/`, после чего записывает все файлы на диск. |
+| **Генерация и вставка графики** | `Сделай арт космического корабля в ретро-стиле и добавь его на главную страницу` | Направляет задачу в ComfyUI, сохраняет бинарный файл изображения в папку проекта и прописывает точный тег `<img>` в HTML. |
+
+**Формат итогового отчёта агента:**
+```text
+Directory created: css/
+File created: css/style.css
+File created: index.html
+File modified: js/app.js
+```
