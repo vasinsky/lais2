@@ -337,7 +337,55 @@ export default function ChatView({
     );
   };
 
-  return (
+  
+    const [pastedImages, setPastedImages] = useState<string[]>([]);
+
+    const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+        const items = e.clipboardData?.items;
+        const files = e.clipboardData?.files;
+        let foundFiles = false;
+
+        if (items) {
+            for (const item of items) {
+                if (item.type.indexOf("image") !== -1 || item.type.indexOf("file") !== -1) {
+                    const blob = item.getAsFile();
+                    if (blob) {
+                        foundFiles = true;
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            const base64 = event.target?.result as string;
+                            if (base64) {
+                                setSelectedImages(prev => [...prev, base64]);
+                            }
+                        };
+                        reader.readAsDataURL(blob);
+                    }
+                }
+            }
+        }
+
+        if (!foundFiles && files && files.length > 0) {
+            for (const file of Array.from(files)) {
+                if (file.type.indexOf("image") !== -1) {
+                    foundFiles = true;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        if (base64) {
+                            setSelectedImages(prev => [...prev, base64]);
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+
+        if (foundFiles) {
+            e.preventDefault();
+        }
+    };
+
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Sub-header with clear action */}
       <div style={{
@@ -398,6 +446,13 @@ export default function ChatView({
                   width: (msg.image_progress || msg.generated_image) ? '100%' : 'auto', 
                   boxSizing: 'border-box'
                 }}>
+                  {msg.images && msg.images.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                      {msg.images.map((img: string, i: number) => (
+                        <img key={i} src={img} alt="attachment" style={{ maxWidth: 160, maxHeight: 160, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)" }} />
+                      ))}
+                    </div>
+                  )}
                   {!isUser && !msg.content && !msg.generated_image && !msg.image_progress ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "2px 2px", color: "var(--text-muted)", fontSize: 11.5 }}>
                       <Sparkles size={13} style={{ color: "var(--primary-color, #3b82f6)", animation: "spin 3s linear infinite" }} />
@@ -552,7 +607,7 @@ export default function ChatView({
             <Paperclip size={15} />
           </button>
 
-          <textarea
+          <textarea onPaste={handlePaste}
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => {

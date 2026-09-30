@@ -449,19 +449,20 @@ async def chat_stream(payload: ChatPayload):
                     content_text += "\n[Вложение: изображение сохранено в истории диалога]"
                 processed_messages.append({"role": m.role, "content": content_text})
 
-            # Текущее активное сообщение с чистым Base64 при наличии
+            # Текущее активное сообщение для текстовой модели (только текст)
             current_msg = {"role": "user", "content": english_user_prompt}
-            if getattr(last_user_msg, "images", None):
-                current_msg["images"] = [
-                    img.split(",", 1)[1] if "," in img else img
-                    for img in last_user_msg.images
-                ]
             processed_messages.append(current_msg)
+
+            # Очищаем ВСЕ сообщения от поля images для не-vision модели qwen2.5-coder
+            cleaned_processed_messages = [
+                {"role": m["role"], "content": m["content"]}
+                for m in processed_messages
+            ]
 
             assistant_full_reply = ""
             req_body = {
                 "model": target_model,
-                "messages": processed_messages,
+                "messages": cleaned_processed_messages,
                 "stream": True,
                 "options": {"num_ctx": 16384, "temperature": 0.4}
             }
