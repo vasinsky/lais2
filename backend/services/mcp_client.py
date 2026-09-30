@@ -244,6 +244,10 @@ class MCPClient:
 
     async def delete_file(self, project: str, filepath: str) -> Dict[str, Any]:
         res = await self._call_tool("delete_file", {"project": project, "filepath": filepath})
+        await project_event_bus.emit(project, {
+            "type": "file_deleted",
+            "path": filepath.lstrip("./\\ ")
+        })
         if isinstance(res, str):
             try:
                 return json.loads(res)

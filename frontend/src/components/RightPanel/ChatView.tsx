@@ -281,16 +281,7 @@ export default function ChatView({
           }}>
             <span>{lang}</span>
             <div style={{ display: 'flex', gap: 6 }}>
-              {onInsertCodeToEditor && (
-                <button
-                  onClick={() => onInsertCodeToEditor(codeStr)}
-                  title="Insert into active editor"
-                  style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11 }}
-                >
-                  <ArrowDownToLine size={12} />
-                  Insert
-                </button>
-              )}
+
               <button
                 onClick={() => handleCopyText(codeStr, codeId)}
                 title="Copy code"

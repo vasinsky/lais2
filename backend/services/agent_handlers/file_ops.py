@@ -152,6 +152,48 @@ class FileOpsHandler(BaseAgentHandler):
                         pass
 
         # Сохранение файлов через MCP и фиксация в БД
+        
+        # Проверяем, не запросил ли агент удаление через tool_call
+        tool_calls = mcp_client.parse_fallback_tool_calls(raw_full_output)
+        for call in tool_calls:
+            if call.get("name") == "delete_file":
+                del_path = call.get("arguments", {}).get("filepath") or target_file
+                if del_path:
+                    await mcp_client.delete_file(task.project_name, del_path.lstrip("./\\ "))
+                    report_lines.append(f"File deleted: {del_path}")
+        
+        if any(c.get("name") == "delete_file" for c in tool_calls):
+            final_report = "\n".join(report_lines)
+            yield {"data": json.dumps({"message": {"content": f"\n```text\n{final_report}\n```\n"}})}
+            return
+
+        
+        # Проверяем намерение или tool_call на удаление файла
+        is_del_request = any(w in task.prompt.lower() for w in ["удали", "удалить", "delete", "remove"])
+        if target_file and is_del_request:
+            try:
+                await mcp_client.delete_file(task.project_name, target_file)
+            except Exception:
+                pass
+            
+            full_disk_path = os.path.abspath(os.path.join(proj_path, target_file))
+            if os.path.exists(full_disk_path):
+                try:
+                    os.remove(full_disk_path)
+                except Exception:
+                    pass
+
+            report_msg = f"File deleted: {target_file}"
+            
+            # Отправляем SSE-событие для мгновенного обновления дерева на фронтенде
+            yield {"data": json.dumps({
+                "type": "file_deleted",
+                "path": target_file.lstrip("./\\ ")
+            })}
+            
+            yield {"data": json.dumps({"message": {"content": f"\n```text\n{report_msg}\n```\n"}})}
+            return
+
         files_to_save = []
         if target_file and raw_full_output.strip():
             clean_body = raw_full_output.strip()

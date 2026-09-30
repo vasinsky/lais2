@@ -20,7 +20,7 @@ IMAGE_INTENT_PATTERNS = [
 FILE_ACTION_TRIGGERS = [
     "создай файл", "добавь файл", "напиши файл", "сделай файл", "создай страницу",
     "измени файл", "исправь файл", "перепиши файл", "обнови файл", "отредактируй",
-    "создай каркас", "каркас",
+    "создай каркас", "каркас", "удали файл", "удалить файл", "сотри файл",
     "create file", "write file", "add file", "make file", "generate file",
     "edit file", "modify file", "update file", "patch file", "refactor",
     "scaffold"

@@ -198,6 +198,40 @@ export default function AgentView({
             if (rawData === '[DONE]') break;
             try {
               const parsed = JSON.parse(rawData);
+        if (parsed.type === 'file_saved' || parsed.type === 'file_deleted' || parsed.data?.type === 'file_saved' || parsed.data?.type === 'file_deleted') {
+          if (typeof onRefreshFiles === 'function') {
+            onRefreshFiles();
+          }
+        }
+        if (parsed.type === 'file_saved' || parsed.type === 'file_deleted' || parsed.data?.type === 'file_saved' || parsed.data?.type === 'file_deleted') {
+          // Вызываем стандартное обновление дерева проектов через событие клика по кнопке обновить или диспатч
+          const refreshBtn = document.querySelector('button[title*="Refresh"], button[title*="refresh"], .fa-rotate-right, .lucide-rotate-cw')?.closest('button');
+          if (refreshBtn) {
+            refreshBtn.click();
+          } else {
+            // Фолбек: триггерим кастомное событие обновления
+            window.dispatchEvent(new Event('project-files-changed'));
+          }
+        }
+        if (parsed.type === 'file_saved' || parsed.type === 'file_deleted' || parsed.data?.type === 'file_saved' || parsed.data?.type === 'file_deleted') {
+          window.dispatchEvent(new CustomEvent('refresh-project-files'));
+        }
+        if (parsed.type === 'file_saved' || parsed.data?.type === 'file_saved') {
+          const savedPath = parsed.path || parsed.data?.path;
+          if (savedPath) {
+            setProjectFiles(prev => {
+              if (!prev.some(f => f.path === savedPath)) {
+                return [...prev, { name: savedPath, path: savedPath, type: 'file', file_type: 'code' }];
+              }
+              return prev;
+            });
+          }
+        } else if (parsed.type === 'file_deleted' || parsed.data?.type === 'file_deleted') {
+          const deletedPath = parsed.path || parsed.data?.path;
+          if (deletedPath) {
+            setProjectFiles(prev => prev.filter(f => f.path !== deletedPath));
+          }
+        }
               if (parsed.message?.content) {
                 setMessages(prev => {
                   const next = [...prev];
